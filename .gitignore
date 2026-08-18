@@ -1,0 +1,36 @@
+# ==== Secrets & runtime data ====
+.env
+*.env
+bot_data.db
+bot_data.db-journal
+bot_data.db-wal
+bot_data.db-shm
+
+# ==== Python ====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# ==== Virtual environments ====
+env/
+venv/
+.venv/
+ENV/
+
+# ==== Editors / IDEs ====
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==== OS junk ====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==== Logs ====
+*.log

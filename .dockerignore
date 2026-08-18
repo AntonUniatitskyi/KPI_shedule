@@ -1,0 +1,33 @@
+# Виртуальное окружение и кэши Python
+env/
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Git
+.git/
+.gitignore
+
+# Секреты — токен не должен попадать в образ
+.env
+.env.*
+
+# База данных — монтируется через volume, не копируется в образ
+*.db
+*.db-journal
+data/
+
+# IDE / ОС
+.idea/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db
+
+# Файлы для докера, которым нет смысла быть внутри образа
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.md

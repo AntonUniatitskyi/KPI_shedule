@@ -1,0 +1,16 @@
+services:
+  kpi-schedule-bot:
+    build: .
+    container_name: kpi-schedule-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Europe/Kyiv
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
