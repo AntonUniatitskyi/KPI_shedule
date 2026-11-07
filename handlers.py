@@ -23,6 +23,7 @@ from db import get_group, get_hidden_subjects, get_link, set_group, set_link, to
 from formatting import format_day, format_week, get_visible_subjects, get_week_type, get_what_now
 from keyboards import LAST_REFRESH, get_cancel_menu, get_main_menu, week_nav_keyboard
 from live_views import track_live_view, untrack_live_view
+from urllib.parse import urlparse
 
 
 router = Router()
@@ -312,6 +313,16 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
     with suppress(TelegramBadRequest):
         await message.delete()
 
+    if not message.text:
+        with suppress(TelegramBadRequest):
+            await bot.edit_message_text(
+                "❌ Будь ласка, надішли текстом",
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                reply_markup=get_cancel_menu()
+            )
+        return
+
     if current_state == BotStates.wait_group:
         groups = await api_get_all_groups()
         norm_text = message.text.lower().replace("-", "").replace(" ", "")
@@ -333,15 +344,48 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
 
     elif current_state == BotStates.wait_link:
         group = await get_group(message.from_user.id)
+        if not group:
+            await state.clear()
+            builder = InlineKeyboardBuilder()
+            builder.button(text="🏠 Головне меню", callback_data=MenuCB(action="main"))
+
+            with suppress(TelegramBadRequest):
+                await bot.edit_message_text(
+                    "❌ Спочатку задай групу!",
+                    chat_id=message.chat.id,
+                    message_id=msg_id,
+                    reply_markup=builder.as_markup()
+                )
+            return
+
+        text = message.text.strip()
+        parsed = urlparse(text)
+
+        is_valid = text == "-" or (parsed.scheme in ("http", "https") and bool(parsed.netloc))
+
+        if not is_valid:
+            with suppress(TelegramBadRequest):
+                await bot.edit_message_text(
+                    "❌ Некоректний формат! Надішли дійсне посилання (http/https) або дефіс (-) для видалення:",
+                    chat_id=message.chat.id,
+                    message_id=msg_id,
+                    reply_markup=get_cancel_menu()
+                )
+            return
+
         subject, pair_type = data["subject"], data["pair_type"]
 
-        await set_link(group["group_id"], subject, pair_type, message.text)
+        await set_link(group["group_id"], subject, pair_type, text)
         await state.clear()
 
         builder = InlineKeyboardBuilder()
         builder.button(text="🏠 Головне меню", callback_data=MenuCB(action="main"))
-        text = "❌ Посилання видалено!" if message.text == "-" else "✅ Посилання збережено!"
+        response_text = "❌ Посилання видалено!" if text == "-" else "✅ Посилання збережено!"
 
         with suppress(TelegramBadRequest):
-            await bot.edit_message_text(text, chat_id=message.chat.id, message_id=msg_id,
-                                        reply_markup=builder.as_markup())
+            await bot.edit_message_text(
+                response_text,
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                reply_markup=builder.as_markup()
+            )
