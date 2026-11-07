@@ -12,7 +12,7 @@ from aiogram.types import (
 )
 
 from api import get_all_group_subjects
-from config import DAY_NAMES, DAYS_MAP, KPI_BELLS, TYPE_ICONS
+from config import DAY_NAMES, DAYS_MAP, KPI_BELLS, TYPE_ICONS, now_kyiv
 from db import get_hidden_subjects, get_link
 
 
@@ -117,7 +117,7 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
         blocks.append(InputRichBlockParagraph(text="🎉 Пар немає (решта приховані в налаштуваннях)"))
         return InputRichMessage(blocks=blocks)
 
-    active_time = get_active_pair_time(datetime.now()) if date.date() == datetime.now().date() else None
+    active_time = get_active_pair_time(now_kyiv()) if date.date() == now_kyiv().date() else None
     rows = [
         await create_pair_row(pair, group_id, is_active=(pair["time"][:5] == active_time))
         for pair in valid_pairs
@@ -151,8 +151,8 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
         if not valid_pairs: continue
 
         has_pairs = True
-        is_today = current_day_date.date() == datetime.now().date()
-        active_time = get_active_pair_time(datetime.now()) if is_today else None
+        is_today = current_day_date.date() == now_kyiv().date()
+        active_time = get_active_pair_time(now_kyiv()) if is_today else None
 
         rows = [
             await create_pair_row(pair, group_id, is_active=(pair["time"][:5] == active_time))

@@ -18,7 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from api import api_get_all_groups, get_all_group_subjects, get_schedule
 from callbacks import BotStates, DayCB, FilterCB, LinkSubjCB, LinkTypeCB, MenuCB, WeekCB
-from config import TYPE_ICONS
+from config import TYPE_ICONS, now_kyiv
 from db import get_group, get_hidden_subjects, get_link, set_group, set_link, toggle_hidden_subject
 from formatting import format_day, format_week, get_visible_subjects, get_week_type, get_what_now
 from keyboards import LAST_REFRESH, get_cancel_menu, get_main_menu, week_nav_keyboard
@@ -61,8 +61,8 @@ async def cb_refresh(query: CallbackQuery):
     if not group: return await query.answer("Спочатку задай групу!", show_alert=True)
 
     await get_schedule(group["group_id"], force=True)
-    LAST_REFRESH[group["group_id"]] = datetime.now()
-    now_str = datetime.now().strftime("%H:%M:%S")
+    LAST_REFRESH[group["group_id"]] = now_kyiv()
+    now_str = now_kyiv().strftime("%H:%M:%S")
     await query.answer("✅ Оновлено!")
 
     with suppress(TelegramBadRequest):
@@ -79,7 +79,7 @@ async def cb_what_now(query: CallbackQuery):
     schedule = await get_schedule(group["group_id"])
 
     if schedule:
-        rich_msg = await get_what_now(schedule, datetime.now(), group["group_id"], query.from_user.id)
+        rich_msg = await get_what_now(schedule, now_kyiv(), group["group_id"], query.from_user.id)
     else:
         rich_msg = InputRichMessage(blocks=[InputRichBlockParagraph(text="❌ Помилка API")])
 
@@ -98,7 +98,7 @@ async def cb_day(query: CallbackQuery, callback_data: DayCB):
     group = await get_group(query.from_user.id)
     if not group: return await query.answer("Спочатку задай групу!", show_alert=True)
 
-    target_date = datetime.now() if callback_data.target == "today" else datetime.now() + timedelta(days=1)
+    target_date = now_kyiv() if callback_data.target == "today" else now_kyiv() + timedelta(days=1)
     schedule = await get_schedule(group["group_id"])
 
     if schedule:
@@ -125,7 +125,7 @@ async def cb_week(query: CallbackQuery, callback_data: WeekCB):
     group = await get_group(query.from_user.id)
     if not group: return await query.answer("Спочатку задай групу!", show_alert=True)
 
-    now = datetime.now()
+    now = now_kyiv()
     if callback_data.type in ("current", "next"):
         target_date = now if callback_data.type == "current" else now + timedelta(days=7)
     else:

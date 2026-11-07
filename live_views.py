@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import LinkPreviewOptions
 
 from api import get_schedule
-from config import KPI_BELLS
+from config import KPI_BELLS, now_kyiv, TZ
 from formatting import format_day, format_week, get_week_type
 from keyboards import get_main_menu, week_nav_keyboard
 
@@ -29,16 +29,16 @@ def next_wake_time(now: datetime) -> datetime:
     candidates = []
     for start, end, _ in KPI_BELLS:
         for t in (start, end):
-            dt = datetime.combine(now.date(), t)
+            dt = datetime.combine(now.date(), t, tzinfo=TZ)
             if dt > now:
                 candidates.append(dt)
-    candidates.append(datetime.combine(now.date() + timedelta(days=1), dtime(0, 0)))
+    candidates.append(datetime.combine(now.date() + timedelta(days=1), dtime(0, 0), tzinfo=TZ))
     return min(candidates)
 
 
 async def live_view_updater(bot: Bot):
     while True:
-        now = datetime.now()
+        now = now_kyiv()
         wake_at = next_wake_time(now)
         await asyncio.sleep(max((wake_at - now).total_seconds(), 5))
         try:
@@ -48,28 +48,28 @@ async def live_view_updater(bot: Bot):
 
 
 async def _refresh_all_live_views(bot: Bot):
-        for chat_id, info in list(LIVE_VIEWS.items()):
-            schedule = await get_schedule(info["group_id"])
-            if not schedule:
-                continue
+    for chat_id, info in list(LIVE_VIEWS.items()):
+        schedule = await get_schedule(info["group_id"])
+        if not schedule:
+            continue
 
-            now = datetime.now()
-            if info["kind"] == "today":
-                rich_msg = await format_day(schedule, now, info["group_id"], info["user_id"])
-                markup = get_main_menu(info["group_id"])
-            else:  # week_current
-                rich_msg = await format_week(schedule, now, info["group_id"], info["user_id"])
-                wt = "first" if get_week_type(now) == "scheduleFirstWeek" else "second"
-                markup = week_nav_keyboard(wt)
+        now = now_kyiv()
+        if info["kind"] == "today":
+            rich_msg = await format_day(schedule, now, info["group_id"], info["user_id"])
+            markup = get_main_menu(info["group_id"])
+        else:  # week_current
+            rich_msg = await format_week(schedule, now, info["group_id"], info["user_id"])
+            wt = "first" if get_week_type(now) == "scheduleFirstWeek" else "second"
+            markup = week_nav_keyboard(wt)
 
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=info["message_id"],
-                    text="Твій розклад (Rich Messages не підтримуються клієнтом)",
-                    rich_message=rich_msg,
-                    reply_markup=markup,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                )
-            except TelegramBadRequest:
-                untrack_live_view(chat_id)
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=info["message_id"],
+                text="Твій розклад (Rich Messages не підтримуються клієнтом)",
+                rich_message=rich_msg,
+                reply_markup=markup,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+        except TelegramBadRequest:
+            untrack_live_view(chat_id)

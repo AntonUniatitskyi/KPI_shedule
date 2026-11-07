@@ -3,7 +3,7 @@ from datetime import datetime
 
 import aiohttp
 
-from config import CACHE_TTL
+from config import CACHE_TTL, now_kyiv
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
@@ -23,7 +23,7 @@ async def api_get_all_groups():
     return await fetch_json("https://api.campus.kpi.ua/schedule/status")
 
 async def get_schedule(group_id: int, force: bool = False):
-    now_ts = datetime.now().timestamp()
+    now_ts = now_kyiv().timestamp()
     if not force and group_id in SCHEDULE_CACHE:
         data, ts = SCHEDULE_CACHE[group_id]
         if now_ts - ts < CACHE_TTL:

@@ -2,7 +2,7 @@ from datetime import datetime
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-
+from config import now_kyiv
 from callbacks import DayCB, FilterCB, LinkSubjCB, MenuCB, WeekCB
 
 LAST_REFRESH: dict[int, datetime] = {}
@@ -10,7 +10,7 @@ LAST_REFRESH: dict[int, datetime] = {}
 def get_main_menu(group_id: int | None = None):
     refresh_label = "🔄 Оновити"
     if group_id and group_id in LAST_REFRESH:
-        mins_ago = int((datetime.now() - LAST_REFRESH[group_id]).total_seconds() // 60)
+        mins_ago = int((now_kyiv() - LAST_REFRESH[group_id]).total_seconds() // 60)
         refresh_label = "🔄 Оновити" if mins_ago > 30 else f"🔄 Оновлено {mins_ago} хв тому"
     builder = InlineKeyboardBuilder()
     builder.button(text="🔥 Що зараз?", callback_data=MenuCB(action="now"), style="primary")

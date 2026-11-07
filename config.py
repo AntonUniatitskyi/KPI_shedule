@@ -1,8 +1,10 @@
 import os
-from datetime import time as dtime
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 
 import decouple
 
+TZ = ZoneInfo("Europe/Kyiv")
 TOKEN = str(decouple.config("TG_TOKEN"))
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -21,3 +23,6 @@ KPI_BELLS = [
 DAYS_MAP = {0: "Пн", 1: "Вв", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб"}
 DAY_NAMES = {"Пн": "Понеділок", "Вв": "Вівторок", "Ср": "Середа", "Чт": "Четвер", "Пт": "Пʼятниця", "Сб": "Субота"}
 TYPE_ICONS = {"Лек": "Лек.📖", "Прак": "Прак.🧪", "Лаб": "Лаб.🔬"}
+
+def now_kyiv():
+    return datetime.now(TZ)
