@@ -9,7 +9,13 @@ TOKEN = str(decouple.config("TG_TOKEN"))
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_NAME = os.path.join(DATA_DIR, "bot_data.db")
+
 CACHE_TTL = 300
+GROUPS_TTL = 3600
+STALE_MAX_AGE = 24 * 3600
+API_TIMEOUT = 5
+
+SEMESTER_START = date(2026, 8, 31)
 
 KPI_BELLS = [
     (dtime(8, 30), dtime(10, 0), "1-ша пара"),

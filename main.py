@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+from api import close_session
+
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -25,7 +27,11 @@ async def main():
     task.add_done_callback(background_tasks.discard)
 
     print("Бот запущений на aiogram v3 з підтримкою Rich Messages...")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        task.cancel()
+        await close_session()
 
 
 if __name__ == "__main__":
