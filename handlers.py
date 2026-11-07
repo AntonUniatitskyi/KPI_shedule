@@ -20,7 +20,7 @@ from api import api_get_all_groups, get_all_group_subjects, get_schedule
 from callbacks import BotStates, DayCB, FilterCB, LinkSubjCB, LinkTypeCB, MenuCB, WeekCB
 from config import TYPE_ICONS, now_kyiv
 from db import get_group, get_hidden_subjects, get_link, set_group, set_link, toggle_hidden_subject
-from formatting import format_day, format_week, get_visible_subjects, get_week_type, get_what_now
+from formatting import format_day, format_week, get_visible_subjects, get_week_type, get_what_now, normalize_group_name
 from keyboards import LAST_REFRESH, get_cancel_menu, get_main_menu, week_nav_keyboard
 from live_views import track_live_view, untrack_live_view
 from urllib.parse import urlparse
@@ -325,8 +325,8 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
 
     if current_state == BotStates.wait_group:
         groups = await api_get_all_groups()
-        norm_text = message.text.lower().replace("-", "").replace(" ", "")
-        result = next((g for g in groups if g["groupName"].lower().replace("-", "") == norm_text),
+        norm_text = normalize_group_name(message.text)
+        result = next((g for g in groups if normalize_group_name(g["groupName"]) == norm_text),
                       None) if groups else None
 
         if result:

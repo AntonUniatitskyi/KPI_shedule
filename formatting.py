@@ -229,3 +229,15 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
     blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True))
 
     return InputRichMessage(blocks=blocks)
+
+LATIN_TO_CYRILLIC = str.maketrans(
+    "aceiopxykmtbh",
+    "асеіорхукмтвн"
+)
+
+def normalize_group_name(s: str) -> str:
+    if not s:
+        return ""
+
+    gr_name = s.lower().replace("-", "").replace(" ", "").translate(LATIN_TO_CYRILLIC)
+    return gr_name
