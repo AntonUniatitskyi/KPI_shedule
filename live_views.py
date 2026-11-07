@@ -1,10 +1,9 @@
 import asyncio
 import logging
-from contextlib import suppress
 from datetime import datetime, time as dtime, timedelta
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import LinkPreviewOptions
 
 from api import get_schedule
@@ -49,27 +48,50 @@ async def live_view_updater(bot: Bot):
 
 async def _refresh_all_live_views(bot: Bot):
     for chat_id, info in list(LIVE_VIEWS.items()):
-        schedule = await get_schedule(info["group_id"])
-        if not schedule:
-            continue
-
-        now = now_kyiv()
-        if info["kind"] == "today":
-            rich_msg = await format_day(schedule, now, info["group_id"], info["user_id"])
-            markup = get_main_menu(info["group_id"])
-        else:  # week_current
-            rich_msg = await format_week(schedule, now, info["group_id"], info["user_id"])
-            wt = "first" if get_week_type(now) == "scheduleFirstWeek" else "second"
-            markup = week_nav_keyboard(wt)
-
         try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=info["message_id"],
-                text="Твій розклад (Rich Messages не підтримуються клієнтом)",
-                rich_message=rich_msg,
-                reply_markup=markup,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-            )
-        except TelegramBadRequest:
+            schedule = await get_schedule(info["group_id"])
+            if not schedule:
+                continue
+
+            now = now_kyiv()
+            if info["kind"] == "today":
+                rich_msg = await format_day(schedule, now, info["group_id"], info["user_id"])
+                markup = get_main_menu(info["group_id"])
+            else:  # week_current
+                rich_msg = await format_week(schedule, now, info["group_id"], info["user_id"])
+                wt = "first" if get_week_type(now) == "scheduleFirstWeek" else "second"
+                markup = week_nav_keyboard(wt)
+
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=info["message_id"],
+                    text="Твій розклад (Rich Messages не підтримуються клієнтом)",
+                    rich_message=rich_msg,
+                    reply_markup=markup,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+            except TelegramRetryAfter as e:
+                logging.warning(f"Rate limit: чекаємо {e.retry_after} секунд...")
+                await asyncio.sleep(e.retry_after)
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=info["message_id"],
+                    text="Твій розклад (Rich Messages не підтримуються клієнтом)",
+                    rich_message=rich_msg,
+                    reply_markup=markup,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+        except TelegramForbiddenError:
+            logging.info(f"Користувач {chat_id} заблокував бота. Відв'язуємо live view.")
             untrack_live_view(chat_id)
+        except TelegramBadRequest as e:
+            if "message is not modified" in e.message:
+                pass
+            elif "message to edit not found" in e.message or "message can't be edited" in e.message:
+                untrack_live_view(chat_id)
+            else:
+                logging.exception(f"Неочікуваний BadRequest для {chat_id}: {e.message}")
+        except Exception:
+            logging.exception(f"Помилка оновлення live view для {chat_id}")
+        await asyncio.sleep(0.1)

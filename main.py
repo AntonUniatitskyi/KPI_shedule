@@ -10,7 +10,7 @@ from db import init_db
 from handlers import router
 from live_views import live_view_updater
 
-
+background_tasks = set()
 async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
@@ -20,7 +20,9 @@ async def main():
     )
     dp = Dispatcher()
     dp.include_router(router)
-    asyncio.create_task(live_view_updater(bot))
+    task = asyncio.create_task(live_view_updater(bot))
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
 
     print("Бот запущений на aiogram v3 з підтримкою Rich Messages...")
     await dp.start_polling(bot)
