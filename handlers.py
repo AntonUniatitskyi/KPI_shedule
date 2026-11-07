@@ -1,3 +1,4 @@
+from html import escape
 from contextlib import suppress
 from datetime import datetime, timedelta
 
@@ -32,7 +33,7 @@ router = Router()
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    await message.reply("👋 *Бот розкладу КПІ*\n\nОбери дію:", parse_mode=ParseMode.MARKDOWN,
+    await message.reply("👋 <b>Бот розкладу КПІ</b>\n\nОбери дію:",
                         reply_markup=get_main_menu())
 
 
@@ -42,7 +43,7 @@ async def cb_main_menu(query: CallbackQuery, state: FSMContext):
     await state.clear()
     group = await get_group(query.from_user.id)
     with suppress(TelegramBadRequest):
-        await query.message.edit_text("🏠 *Головне меню*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu(group["group_id"] if group else None))
+        await query.message.edit_text("🏠 <b>Головне меню</b>", reply_markup=get_main_menu(group["group_id"] if group else None))
     await query.answer()
 
 
@@ -67,7 +68,7 @@ async def cb_refresh(query: CallbackQuery):
     await query.answer("✅ Оновлено!")
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(f"🏠 *Головне меню*\n_🔄 Оновлено о {now_str}_", parse_mode=ParseMode.MARKDOWN,
+        await query.message.edit_text(f"🏠 <b>Головне меню</b>\n<i>🔄 Оновлено о {now_str}</i>",
                                       reply_markup=get_main_menu(group["group_id"]))
 
 
@@ -203,14 +204,14 @@ async def cb_filter_subjects(query: CallbackQuery, callback_data: FilterCB):
     builder.row(InlineKeyboardButton(text="🏠 Головне меню", callback_data=MenuCB(action="main").pack()))
 
     text = (
-        "🎯 *Налаштування твоїх предметів*\n\n"
+        "🎯 <b>Налаштування твоїх предметів</b>\n\n"
         "Натискай на назву, щоб приховати або повернути предмет у розклад:\n"
         "✅ — відображається у розкладі\n"
         "❌ — приховано (вибіркова, яку ти не відвідуєш)"
     )
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=builder.as_markup())
+        await query.message.edit_text(text, reply_markup=builder.as_markup())
     if callback_data.action != "toggle":
         await query.answer()
 
@@ -251,8 +252,7 @@ async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB)
     with suppress(TelegramBadRequest):
         await query.message.edit_text(
             "🔗 Обери предмет для налаштування посилання:\n"
-            "_(показані лише ті, що активні в «Моїх предметах»)_",
-            parse_mode=ParseMode.MARKDOWN,
+            "<i>(показані лише ті, що активні в «Моїх предметах»)</i>",
             reply_markup=builder.as_markup(),
         )
     await query.answer()
@@ -263,6 +263,8 @@ async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB
     group = await get_group(query.from_user.id)
     subjects = await get_visible_subjects(query.from_user.id, group["group_id"])  # ← тот же список, что и в списке выше
     subject = subjects[callback_data.idx]
+
+    safe_subject = escape(subject, quote=False)
 
     builder = InlineKeyboardBuilder()
     for p_type, icon in TYPE_ICONS.items():
@@ -275,7 +277,7 @@ async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB
     builder.adjust(1)
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(f"📚 *{subject}*\nОбери тип заняття:", parse_mode=ParseMode.MARKDOWN,
+        await query.message.edit_text(f"📚 <b>{safe_subject}</b>\nОбери тип заняття:",
                                       reply_markup=builder.as_markup())
     await query.answer()
 
@@ -292,12 +294,15 @@ async def cb_link_edit(query: CallbackQuery, callback_data: LinkTypeCB, state: F
     await state.set_state(BotStates.wait_link)
     await state.update_data(subject=subject, pair_type=callback_data.pair_type, msg_id=query.message.message_id)
 
-    text = (f"🔗 *{subject}* ({callback_data.pair_type})\n\nПоточне: `{link}`\n\nНадішли нове посилання або `-` щоб видалити."
+    safe_subject = escape(subject, quote=False)
+    safe_link = escape(link, quote=False) if link else None
+
+    text = (f"🔗 <b>{safe_subject}</b> ({callback_data.pair_type})\n\nПоточне: <code>{safe_link}</code>\n\nНадішли нове посилання або <code>-</code> щоб видалити."
             if link else
-            f"🔗 *{subject}* ({callback_data.pair_type})\n\nПосилання не задано. Надішли його повідомленням.")
+            f"🔗 <b>{safe_subject}</b> ({callback_data.pair_type})\n\nПосилання не задано. Надішли його повідомленням.")
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_cancel_menu())
+        await query.message.edit_text(text, reply_markup=get_cancel_menu())
     await query.answer()
 
 @router.callback_query(F.data == "noop")
@@ -332,14 +337,16 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
         if result:
             await set_group(message.from_user.id, result["groupName"], result["id"])
             await state.clear()
+            safe_group_name = escape(result["groupName"], quote=False)
             with suppress(TelegramBadRequest):
-                await bot.edit_message_text(f"✅ Група *{result['groupName']}* збережена!", chat_id=message.chat.id,
-                                            message_id=msg_id, parse_mode=ParseMode.MARKDOWN,
+                await bot.edit_message_text(f"✅ Група <b>{safe_group_name}</b> збережена!", chat_id=message.chat.id,
+                                            message_id=msg_id,
                                             reply_markup=get_main_menu(result["id"]))
         else:
+            safe_input = escape(message.text, quote=False)
             with suppress(TelegramBadRequest):
-                await bot.edit_message_text(f"❌ Групу *{message.text}* не знайдено. Спробуй ще раз:",
-                                            chat_id=message.chat.id, message_id=msg_id, parse_mode=ParseMode.MARKDOWN,
+                await bot.edit_message_text(f"❌ Групу <b>{safe_input}</b> не знайдено. Спробуй ще раз:",
+                                            chat_id=message.chat.id, message_id=msg_id,
                                             reply_markup=get_cancel_menu())
 
     elif current_state == BotStates.wait_link:

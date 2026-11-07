@@ -98,7 +98,7 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
 
     if not day_key:
         blocks.extend([
-            InputRichBlockSectionHeading(text="Сьогодні неділя! 🎉", size=1),
+            InputRichBlockSectionHeading(text="Неділя — вихідний! 🎉", size=1),
             InputRichBlockParagraph(text="Відпочивай 🍻")
         ])
         return InputRichMessage(blocks=blocks)
@@ -191,7 +191,10 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
         return InputRichMessage(blocks=[InputRichBlockParagraph(text="На сьогодні пар у розкладі немає. 🎉")])
 
     hidden = await get_hidden_subjects(user_id, group_id)
-    available_pairs = [p for p in today_schedule.get("pairs", []) if p.get("name") not in hidden]
+    available_pairs = [
+        p for p in today_schedule.get("pairs", [])
+        if p.get("name") not in hidden and is_pair_relevant(p, now)
+    ]
 
     if not available_pairs:
         return InputRichMessage(blocks=[InputRichBlockParagraph(text="На сьогодні твоїх пар немає. 🎉")])
@@ -229,6 +232,7 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
     blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True))
 
     return InputRichMessage(blocks=blocks)
+
 
 LATIN_TO_CYRILLIC = str.maketrans(
     "aceiopxykmtbh",

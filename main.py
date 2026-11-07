@@ -2,6 +2,8 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 
 from config import TOKEN
 from db import init_db
@@ -12,7 +14,10 @@ from live_views import live_view_updater
 async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
-    bot = Bot(token=TOKEN)
+    bot = Bot(
+        token=TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     dp = Dispatcher()
     dp.include_router(router)
     asyncio.create_task(live_view_updater(bot))
