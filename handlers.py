@@ -1,4 +1,6 @@
 from html import escape
+
+import zlib
 from contextlib import suppress
 from datetime import datetime, timedelta
 
@@ -20,7 +22,7 @@ from api import api_get_all_groups, get_all_group_subjects, get_schedule
 from callbacks import BotStates, DayCB, FilterCB, LinkSubjCB, LinkTypeCB, MenuCB, WeekCB
 from config import TYPE_ICONS, now_kyiv
 from db import get_group, get_hidden_subjects, get_link, set_group, set_link, toggle_hidden_subject
-from formatting import format_day, format_week, get_visible_subjects, get_week_type, get_what_now, normalize_group_name
+from formatting import format_day, format_week, get_visible_subjects, get_week_type, get_what_now, normalize_group_name, get_subject_by_id
 from keyboards import LAST_REFRESH, get_cancel_menu, get_main_menu, week_nav_keyboard
 from live_views import track_live_view, untrack_live_view
 from urllib.parse import urlparse
@@ -174,7 +176,9 @@ async def cb_filter_subjects(query: CallbackQuery, callback_data: FilterCB):
     PAGE_SIZE = 7
 
     if callback_data.action == "toggle":
-        subj_name = subjects[callback_data.idx]
+        subj_name = get_subject_by_id(subjects, callback_data.idx)
+        if not subj_name:
+            return await query.answer("Список змінився, відкрий ще раз", show_alert=True)
         is_now_hidden = await toggle_hidden_subject(query.from_user.id, group["group_id"], subj_name)
         status_msg = "❌ Приховано з розкладу" if is_now_hidden else "✅ Додано в розклад"
         await query.answer(status_msg)
@@ -184,11 +188,11 @@ async def cb_filter_subjects(query: CallbackQuery, callback_data: FilterCB):
     chunk = subjects[start:start + PAGE_SIZE]
 
     builder = InlineKeyboardBuilder()
-    for i, s in enumerate(chunk):
-        real_idx = start + i
+    for s in chunk:
+        subj_id = zlib.crc32(s.encode())
         mark = "❌" if s in hidden else "✅"
         btn_text = f"{mark} {s[:32]}..." if len(s) > 35 else f"{mark} {s}"
-        builder.button(text=btn_text, callback_data=FilterCB(action="toggle", page=page, idx=real_idx))
+        builder.button(text=btn_text, callback_data=FilterCB(action="toggle", page=page, idx=subj_id))
 
     builder.adjust(1)
     nav_buttons = []
@@ -233,9 +237,9 @@ async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB)
     chunk = subjects[start:start + PAGE_SIZE]
 
     builder = InlineKeyboardBuilder()
-    for i, s in enumerate(chunk):
-        real_idx = start + i
-        builder.button(text=s[:35], callback_data=LinkSubjCB(page=page, idx=real_idx))
+    for s in chunk:
+        subj_id = zlib.crc32(s.encode())
+        builder.button(text=s[:35], callback_data=LinkSubjCB(page=page, idx=subj_id))
     builder.adjust(1)
 
     nav_buttons = []
@@ -260,8 +264,11 @@ async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB)
 @router.callback_query(LinkSubjCB.filter(F.idx >= 0))
 async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB):
     group = await get_group(query.from_user.id)
+    if not group: return await query.answer("Спочатку задай групу!", show_alert=True)
     subjects = await get_visible_subjects(query.from_user.id, group["group_id"])  # ← тот же список, что и в списке выше
-    subject = subjects[callback_data.idx]
+    subject = get_subject_by_id(subjects, callback_data.idx)
+    if not subject:
+        return await query.answer("Список змінився, відкрий ще раз", show_alert=True)
 
     safe_subject = escape(subject, quote=False)
 
@@ -285,8 +292,11 @@ async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB
 @router.callback_query(LinkTypeCB.filter())
 async def cb_link_edit(query: CallbackQuery, callback_data: LinkTypeCB, state: FSMContext):
     group = await get_group(query.from_user.id)
+    if not group: return await query.answer("Спочатку задай групу!", show_alert=True)
     subjects = await get_visible_subjects(query.from_user.id, group["group_id"])  # ← и тут тоже
-    subject = subjects[callback_data.idx]
+    subject = get_subject_by_id(subjects, callback_data.idx)
+    if not subject:
+        return await query.answer("Список змінився, відкрий ще раз", show_alert=True)
 
     link = await get_link(group["group_id"], subject, callback_data.pair_type)
 

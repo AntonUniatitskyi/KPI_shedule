@@ -1,3 +1,4 @@
+import zlib
 from datetime import datetime, timedelta
 
 from aiogram.types import (
@@ -245,3 +246,9 @@ def normalize_group_name(s: str) -> str:
 
     gr_name = s.lower().replace("-", "").replace(" ", "").translate(LATIN_TO_CYRILLIC)
     return gr_name
+
+def get_subject_by_id(subjects: list[str], subj_id: int) -> str | None:
+    for s in subjects:
+        if zlib.crc32(s.encode()) == subj_id:
+            return s
+    return None
