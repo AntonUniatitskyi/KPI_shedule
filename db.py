@@ -50,6 +50,15 @@ async def init_db():
                              group_id INTEGER
                          )
                          ''')
+        await db.execute('''
+                         CREATE TABLE IF NOT EXISTS chat_groups
+                         (
+                             chat_id INTEGER PRIMARY KEY,
+                             group_name TEXT,
+                             group_id INTEGER,
+                             set_by INTEGER
+                         )
+                         ''')
         await _migrate_links(db)
         await db.execute('''
                          CREATE TABLE IF NOT EXISTS user_hidden_subjects
@@ -76,6 +85,32 @@ async def set_group(user_id: int, group_name: str, group_id: int):
         await db.execute("INSERT OR REPLACE INTO user_groups (user_key, group_name, group_id) VALUES (?, ?, ?)",
                          (str(user_id), group_name, group_id))
         await db.commit()
+
+
+async def get_chat_group(chat_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT group_name, group_id FROM chat_groups WHERE chat_id = ?",
+                              (chat_id,)) as cursor:
+            row = await cursor.fetchone()
+            return {"group_name": row[0], "group_id": row[1]} if row else None
+
+
+async def set_chat_group(chat_id: int, group_name: str, group_id: int, set_by: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO chat_groups (chat_id, group_name, group_id, set_by) VALUES (?, ?, ?, ?)",
+            (chat_id, group_name, group_id, set_by))
+        await db.commit()
+
+
+def is_group_chat(chat) -> bool:
+    return chat.type in ("group", "supergroup")
+
+
+async def resolve_group(user_id: int, chat):
+    if is_group_chat(chat):
+        return await get_chat_group(chat.id)
+    return await get_group(user_id)
 
 
 async def get_hidden_subjects(user_id: int, group_id: int) -> set[str]:
