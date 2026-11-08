@@ -8,17 +8,20 @@ from aiogram.types import (
     InputRichBlockTable,
     InputRichMessage,
     RichBlockTableCell,
+    RichMessageButton,
     RichTextBold,
+    RichTextButton,
     RichTextUrl,
 )
 
 from api import get_all_group_subjects
 from config import DAY_NAMES, DAYS_MAP, KPI_BELLS, TYPE_ICONS, now_kyiv
 from db import get_hidden_subjects, get_link
+from semester import week_type_for
 
 
 def get_table_headers() -> list[RichBlockTableCell]:
-    headers = ["Час", "Предмет", "Викл.", "Ауд.","Лінк"]
+    headers = ["Час", "Предмет", "Викл.", "Ауд."]
     return [
         RichBlockTableCell(text=RichTextBold(text=h), is_header=True, align="center", valign="middle")
         for h in headers
@@ -35,7 +38,7 @@ def is_pair_relevant(pair: dict, target_date: datetime) -> bool:
 
 
 def get_week_type(date: datetime) -> str:
-    return "scheduleFirstWeek" if date.isocalendar()[1] % 2 == 0 else "scheduleSecondWeek"
+    return week_type_for(date.date())
 
 def get_active_pair_time(now: datetime) -> str | None:
     t = now.time()
@@ -50,7 +53,7 @@ async def get_visible_subjects(user_id: int, group_id: int) -> list[str]:
     return [s for s in all_subjects if s not in hidden]
 
 
-async def create_pair_row(pair: dict, group_id: int, is_active: bool = False) -> list[RichBlockTableCell]:
+async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bool = False) -> list[RichBlockTableCell]:
     lecturer = pair.get("lecturer")
     teacher_name = lecturer.get("name", "Викладач не вказаний") if lecturer else "Викладач не вказаний"
     teacher = short_name(teacher_name) if teacher_name != "Викладач не вказаний" else teacher_name
@@ -58,14 +61,23 @@ async def create_pair_row(pair: dict, group_id: int, is_active: bool = False) ->
     subject = pair.get("name", "Невідомий предмет")
     pair_type = pair.get("type", "")
     icon = TYPE_ICONS.get(pair_type, "📘")
-    link = await get_link(group_id, subject, pair_type)
+    link = await get_link(user_id, group_id, subject, pair_type)
 
     time_text = f"🟢 {pair['time'][:5]}" if is_active else pair["time"][:5]
 
     time_cell = RichBlockTableCell(text=time_text, align="center", valign="middle")
 
+    # якщо є посилання — назва предмета стає кнопкою всередині таблиці,
+    # інакше звичайний жирний текст
+    if link:
+        name_part = RichTextButton(
+            button=RichMessageButton(text=subject, url=link, style="primary")
+        )
+    else:
+        name_part = RichTextBold(text=subject)
+
     subject_cell = RichBlockTableCell(
-        text=[f"{icon} ", RichTextBold(text=subject), f" ({pair_type})"],
+        text=[f"{icon} ", name_part, f" ({pair_type})"],
         align="left",
         valign="middle",
     )
@@ -80,16 +92,7 @@ async def create_pair_row(pair: dict, group_id: int, is_active: bool = False) ->
     else:
         location_cell = RichBlockTableCell(text="—", align="center", valign="middle")
 
-    if link:
-        link_cell = RichBlockTableCell(
-            text=RichTextUrl(text="🔗 Лінк", url=link),
-            align="center",
-            valign="middle",
-        )
-    else:
-        link_cell = RichBlockTableCell(text="❌", align="center", valign="middle")
-
-    return [time_cell, subject_cell, teacher_cell, location_cell, link_cell]
+    return [time_cell, subject_cell, teacher_cell, location_cell]
 
 
 async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int) -> InputRichMessage:
@@ -120,12 +123,12 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
 
     active_time = get_active_pair_time(now_kyiv()) if date.date() == now_kyiv().date() else None
     rows = [
-        await create_pair_row(pair, group_id, is_active=(pair["time"][:5] == active_time))
+        await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time))
         for pair in valid_pairs
     ]
 
     table_cells = [get_table_headers()] + rows
-    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True))
+    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True, is_compact=True))
 
     return InputRichMessage(blocks=blocks)
 
@@ -156,12 +159,12 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
         active_time = get_active_pair_time(now_kyiv()) if is_today else None
 
         rows = [
-            await create_pair_row(pair, group_id, is_active=(pair["time"][:5] == active_time))
+            await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time))
             for pair in valid_pairs
         ]
 
         table_cells = [get_table_headers()] + rows
-        day_table = InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True)
+        day_table = InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True, is_compact=True)
 
         blocks.append(
             InputRichBlockDetails(
@@ -221,16 +224,16 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
         blocks.append(InputRichBlockParagraph(text="За твоїм вибором тут вікно. Час зробити каву! ☕"))
         return InputRichMessage(blocks=blocks)
 
-    row_data = await create_pair_row(active_pair, group_id)
+    row_data = await create_pair_row(active_pair, group_id, user_id)
 
-    custom_headers = ["Предмет", "Викладач", "Ауд.", "Лінк"]
+    custom_headers = ["Предмет", "Викладач", "Ауд."]
     header_cells = [
         RichBlockTableCell(text=RichTextBold(text=h), is_header=True, align="center", valign="middle")
         for h in custom_headers
     ]
 
     table_cells = [header_cells, row_data[1:]]
-    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True))
+    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True, is_compact=True))
 
     return InputRichMessage(blocks=blocks)
 

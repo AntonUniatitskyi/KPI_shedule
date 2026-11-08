@@ -274,7 +274,7 @@ async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB
 
     builder = InlineKeyboardBuilder()
     for p_type, icon in TYPE_ICONS.items():
-        exists = await get_link(group["group_id"], subject, p_type)
+        exists = await get_link(query.from_user.id, group["group_id"], subject, p_type)
         mark = "✅" if exists else "➕"
         builder.button(text=f"{icon} {p_type} {mark}",
                        callback_data=LinkTypeCB(idx=callback_data.idx, pair_type=p_type))
@@ -298,7 +298,7 @@ async def cb_link_edit(query: CallbackQuery, callback_data: LinkTypeCB, state: F
     if not subject:
         return await query.answer("Список змінився, відкрий ще раз", show_alert=True)
 
-    link = await get_link(group["group_id"], subject, callback_data.pair_type)
+    link = await get_link(query.from_user.id, group["group_id"], subject, callback_data.pair_type)
 
     await state.set_state(BotStates.wait_link)
     await state.update_data(subject=subject, pair_type=callback_data.pair_type, msg_id=query.message.message_id)
@@ -391,7 +391,7 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
 
         subject, pair_type = data["subject"], data["pair_type"]
 
-        await set_link(group["group_id"], subject, pair_type, text)
+        await set_link(message.from_user.id, group["group_id"], subject, pair_type, text)
         await state.clear()
 
         builder = InlineKeyboardBuilder()
