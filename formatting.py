@@ -21,7 +21,7 @@ from semester import week_type_for
 
 
 def get_table_headers() -> list[RichBlockTableCell]:
-    headers = ["Час", "Предмет", "Викл.", "Ауд."]
+    headers = ["Час", "Предмет", "Викл.", "Ауд.", "🔗"]
     return [
         RichBlockTableCell(text=RichTextBold(text=h), is_header=True, align="center", valign="middle")
         for h in headers
@@ -67,17 +67,8 @@ async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bo
 
     time_cell = RichBlockTableCell(text=time_text, align="center", valign="middle")
 
-    # якщо є посилання — назва предмета стає кнопкою всередині таблиці,
-    # інакше звичайний жирний текст
-    if link:
-        name_part = RichTextButton(
-            button=RichMessageButton(text=subject, url=link, style="primary")
-        )
-    else:
-        name_part = RichTextBold(text=subject)
-
     subject_cell = RichBlockTableCell(
-        text=[f"{icon} ", name_part, f" ({pair_type})"],
+        text=[f"{icon} ", RichTextBold(text=subject), f" ({pair_type})"],
         align="left",
         valign="middle",
     )
@@ -92,7 +83,17 @@ async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bo
     else:
         location_cell = RichBlockTableCell(text="—", align="center", valign="middle")
 
-    return [time_cell, subject_cell, teacher_cell, location_cell]
+    # коротка кнопка в окремій вузькій колонці: не розтягує таблицю
+    if link:
+        link_cell = RichBlockTableCell(
+            text=RichTextButton(button=RichMessageButton(text="🔗", url=link, style="link")),
+            align="center",
+            valign="middle",
+        )
+    else:
+        link_cell = RichBlockTableCell(text="—", align="center", valign="middle")
+
+    return [time_cell, subject_cell, teacher_cell, location_cell, link_cell]
 
 
 async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int) -> InputRichMessage:
@@ -226,7 +227,7 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
 
     row_data = await create_pair_row(active_pair, group_id, user_id)
 
-    custom_headers = ["Предмет", "Викладач", "Ауд."]
+    custom_headers = ["Предмет", "Викладач", "Ауд.", "🔗"]
     header_cells = [
         RichBlockTableCell(text=RichTextBold(text=h), is_header=True, align="center", valign="middle")
         for h in custom_headers
