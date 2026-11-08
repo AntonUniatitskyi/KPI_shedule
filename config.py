@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, time as dtime
+from datetime import date, datetime, time as dtime
 from zoneinfo import ZoneInfo
 
 import decouple
