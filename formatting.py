@@ -21,7 +21,7 @@ from semester import week_type_for
 
 
 def get_table_headers() -> list[RichBlockTableCell]:
-    headers = ["Час", "Предмет", "Викл.", "Ауд.", "🔗"]
+    headers = ["Час", "Предмет", "Викл.", "Ауд.", "Лінк"]
     return [
         RichBlockTableCell(text=RichTextBold(text=h), is_header=True, align="center", valign="middle")
         for h in headers
@@ -129,7 +129,7 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
     ]
 
     table_cells = [get_table_headers()] + rows
-    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True, is_compact=True))
+    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True))
 
     return InputRichMessage(blocks=blocks)
 
@@ -165,7 +165,7 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
         ]
 
         table_cells = [get_table_headers()] + rows
-        day_table = InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True, is_compact=True)
+        day_table = InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True)
 
         blocks.append(
             InputRichBlockDetails(
@@ -227,14 +227,14 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
 
     row_data = await create_pair_row(active_pair, group_id, user_id)
 
-    custom_headers = ["Предмет", "Викладач", "Ауд.", "🔗"]
+    custom_headers = ["Предмет", "Викладач", "Ауд.", "Лінк"]
     header_cells = [
         RichBlockTableCell(text=RichTextBold(text=h), is_header=True, align="center", valign="middle")
         for h in custom_headers
     ]
 
     table_cells = [header_cells, row_data[1:]]
-    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True, is_compact=True))
+    blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True))
 
     return InputRichMessage(blocks=blocks)
 
