@@ -4,7 +4,7 @@ import time
 
 import aiohttp
 
-from config import API_TIMEOUT, CACHE_TTL, GROUPS_TTL, STALE_MAX_AGE
+from config import API_TIMEOUT, CACHE_TTL, GROUPS_TTL, REFRESH_COOLDOWN, STALE_MAX_AGE
 from semester import update_anchor_from_schedule
 
 API_BASE = "https://api.campus.kpi.ua"
@@ -13,6 +13,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 _session: aiohttp.ClientSession | None = None
 _cache: dict[str, tuple[object, float]] = {}   # key -> (дані, monotonic-час збереження)
 _locks: dict[str, asyncio.Lock] = {}
+_last_refresh_try: dict[int, float] = {}       # group_id -> час останньої спроби примусового оновлення
 
 
 def _get_session() -> aiohttp.ClientSession:
@@ -88,6 +89,35 @@ async def get_schedule(group_id: int, force: bool = False):
         force=force,
         on_fresh=update_anchor_from_schedule,
     )
+
+
+def schedule_age_seconds(group_id: int) -> float | None:
+    entry = _cache.get(f"schedule:{group_id}")
+    return time.monotonic() - entry[1] if entry else None
+
+
+async def refresh_schedule(group_id: int) -> tuple[str, int]:
+    """Примусове оновлення з обмеженням частоти (на групу, а не на користувача).
+
+    Повертає (статус, число):
+      "fresh"    — розклад щойно завантажено з API;
+      "cooldown" — зарано, число = скільки секунд зачекати;
+      "stale"    — API недоступний, лишились старі дані з кешу;
+      "none"     — API недоступний і даних немає.
+    """
+    now = time.monotonic()
+    last = _last_refresh_try.get(group_id)
+    if last is not None and now - last < REFRESH_COOLDOWN:
+        return "cooldown", int(REFRESH_COOLDOWN - (now - last)) + 1
+    _last_refresh_try[group_id] = now  # рахуємо і невдалі спроби, щоб не довбити лежачий API
+
+    before = _cache.get(f"schedule:{group_id}")
+    data = await get_schedule(group_id, force=True)
+    after = _cache.get(f"schedule:{group_id}")
+
+    if after is not None and (before is None or after[1] > before[1]):
+        return "fresh", 0
+    return ("stale", 0) if data else ("none", 0)
 
 
 async def get_all_group_subjects(group_id: int) -> list[str]:

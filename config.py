@@ -14,6 +14,7 @@ CACHE_TTL = 300
 GROUPS_TTL = 3600
 STALE_MAX_AGE = 24 * 3600
 API_TIMEOUT = 5
+REFRESH_COOLDOWN = 60
 
 SEMESTER_START = date(2026, 8, 31)
 
@@ -30,5 +31,5 @@ DAYS_MAP = {0: "Пн", 1: "Вв", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб"}
 DAY_NAMES = {"Пн": "Понеділок", "Вв": "Вівторок", "Ср": "Середа", "Чт": "Четвер", "Пт": "Пʼятниця", "Сб": "Субота"}
 TYPE_ICONS = {"Лек": "Лек.📖", "Прак": "Прак.🧪", "Лаб": "Лаб.🔬"}
 
-def now_kyiv():
+def now_kyiv() -> datetime:
     return datetime.now(TZ)

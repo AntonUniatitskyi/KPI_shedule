@@ -22,7 +22,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from access import clear_admin_cache, is_group_admin
-from api import api_get_all_groups, get_all_group_subjects, get_schedule
+from api import api_get_all_groups, get_all_group_subjects, get_schedule, refresh_schedule, schedule_age_seconds
 from callbacks import BotStates, DayCB, FilterCB, LinkSubjCB, LinkTypeCB, MenuCB, WeekCB
 from config import TYPE_ICONS, now_kyiv
 from db import (
@@ -44,7 +44,7 @@ from formatting import (
     get_what_now,
     normalize_group_name,
 )
-from keyboards import LAST_REFRESH, get_cancel_menu, get_main_menu, week_nav_keyboard
+from keyboards import get_cancel_menu, get_main_menu, week_nav_keyboard
 from texts import HELP_DM, HELP_GROUP, SHORT_MENU_DM
 from live_views import track_live_view, untrack_live_view
 
@@ -226,14 +226,27 @@ async def cb_refresh(query: CallbackQuery, callback_data: MenuCB, bot: Bot):
     if not group:
         return await query.answer(no_group_text(in_group), show_alert=True)
 
-    await get_schedule(group["group_id"], force=True)
-    LAST_REFRESH[group["group_id"]] = now_kyiv()
+    status, wait = await refresh_schedule(group["group_id"])
+
+    if status == "cooldown":
+        return await query.answer(f"⏳ Розклад щойно оновлювався. Спробуй через {wait} с.")
+    if status == "none":
+        return await query.answer("❌ API недоступний, і збережених даних немає.", show_alert=True)
+
     now_str = now_kyiv().strftime("%H:%M:%S")
-    await query.answer("✅ Оновлено!")
+    if status == "fresh":
+        await query.answer("✅ Оновлено!")
+        note = f"<i>🔄 Оновлено о {now_str}</i>"
+    else:  # stale
+        age = schedule_age_seconds(group["group_id"])
+        age_txt = f"{int(age // 60)} хв тому" if age is not None else "раніше"
+        await query.answer("⚠️ API недоступний, показую збережені дані.", show_alert=True)
+        note = f"<i>⚠️ API недоступний. Дані з кешу (завантажено {age_txt})</i>"
 
     with suppress(TelegramBadRequest):
-        await edit_screen(query, bot,
-            f"🏠 <b>Головне меню</b>\n<i>🔄 Оновлено о {now_str}</i>",
+        await edit_screen(
+            query, bot,
+            f"🏠 <b>Головне меню</b>\n{note}",
             reply_markup=await menu_markup(bot, query.from_user.id, group["group_id"],
                                            callback_data.owner, in_group),
         )

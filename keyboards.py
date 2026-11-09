@@ -1,19 +1,15 @@
-from datetime import datetime
-
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from callbacks import DayCB, FilterCB, LinkSubjCB, MenuCB, WeekCB
-from config import now_kyiv
-
-LAST_REFRESH: dict[int, datetime] = {}
+from api import schedule_age_seconds
 
 
 def get_main_menu(group_id: int | None = None, owner: int = 0, in_group: bool = False,
                   show_shared: bool = False):
     refresh_label = "🔄 Оновити"
-    if group_id and group_id in LAST_REFRESH:
-        mins_ago = int((now_kyiv() - LAST_REFRESH[group_id]).total_seconds() // 60)
-        refresh_label = "🔄 Оновити" if mins_ago > 30 else f"🔄 Оновлено {mins_ago} хв тому"
+    age = schedule_age_seconds(group_id) if group_id else None
+    if age is not None and age < 30 * 60:
+        refresh_label = f"🔄 Оновлено {int(age // 60)} хв тому"
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🔥 Що зараз?", callback_data=MenuCB(action="now", owner=owner), style="primary")
