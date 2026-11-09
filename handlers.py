@@ -1,4 +1,5 @@
 import zlib
+import logging
 from contextlib import suppress
 from datetime import timedelta
 from html import escape
@@ -10,8 +11,10 @@ from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
+    EphemeralMessageParameters,
     InlineKeyboardButton,
     InputRichBlockParagraph,
+    InlineKeyboardMarkup,
     InputRichMessage,
     LinkPreviewOptions,
     Message,
@@ -53,6 +56,45 @@ def no_group_text(in_group: bool) -> str:
     return "Спочатку задай групу!"
 
 
+async def edit_screen(query: CallbackQuery, bot: Bot, text: str, *, rich_message=None,
+                      reply_markup: InlineKeyboardMarkup | None = None, link_preview_options=None):
+    msg = query.message
+    kwargs = {"reply_markup": reply_markup}
+    if rich_message is not None:
+        kwargs["rich_message"] = rich_message
+    if link_preview_options is not None:
+        kwargs["link_preview_options"] = link_preview_options
+
+    eph_id = getattr(msg, "ephemeral_message_id", None)
+    if eph_id:
+        await bot.edit_ephemeral_message_text(
+            chat_id=msg.chat.id,
+            receiver_user_id=query.from_user.id,
+            ephemeral_message_id=eph_id,
+            text=text,
+            **kwargs,
+        )
+    else:
+        await msg.edit_text(text, **kwargs)
+
+
+async def send_menu(message: Message, bot: Bot, text: str, reply_markup: InlineKeyboardMarkup):
+    if is_group_chat(message.chat) and message.from_user:
+        try:
+            await bot.send_message(
+                chat_id=message.chat.id,
+                text=text,
+                reply_markup=reply_markup,
+                ephemeral_message_parameters=EphemeralMessageParameters(
+                    receiver_user_id=message.from_user.id
+                ),
+            )
+            return
+        except TelegramBadRequest as e:
+            logging.warning("Ephemeral-відповідь не вдалась, надсилаю звичайну: %s", e)
+    await message.reply(text, reply_markup=reply_markup)
+
+
 async def deny_foreign(query: CallbackQuery, callback_data) -> bool:
     owner = getattr(callback_data, "owner", 0)
     if owner and owner != query.from_user.id:
@@ -79,7 +121,7 @@ async def find_group_by_name(text: str):
 
 
 @router.message(Command("start", "menu"))
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     if is_group_chat(message.chat):
         group = await resolve_group(message.from_user.id, message.chat)
@@ -89,9 +131,10 @@ async def cmd_start(message: Message, state: FSMContext):
                 "Адмін має виконати: <code>/setgroup ІЦ-12</code>"
             )
         safe_name = escape(group["group_name"], quote=False)
-        return await message.reply(
+        return await send_menu(
+            message, bot,
             f"👋 <b>Бот розкладу КПІ</b> — {safe_name}\nОбери дію:",
-            reply_markup=get_main_menu(group["group_id"], owner=message.from_user.id, in_group=True),
+            get_main_menu(group["group_id"], owner=message.from_user.id, in_group=True),
         )
     await message.reply("👋 <b>Бот розкладу КПІ</b>\n\nОбери дію:", reply_markup=get_main_menu())
 
@@ -125,7 +168,7 @@ async def cmd_setgroup(message: Message, command: CommandObject, bot: Bot):
 
 
 @router.callback_query(MenuCB.filter(F.action == "main"))
-async def cb_main_menu(query: CallbackQuery, callback_data: MenuCB, state: FSMContext):
+async def cb_main_menu(query: CallbackQuery, callback_data: MenuCB, state: FSMContext, bot: Bot):
     if await deny_foreign(query, callback_data):
         return
     untrack_live_view(query.message.chat.id)
@@ -133,7 +176,7 @@ async def cb_main_menu(query: CallbackQuery, callback_data: MenuCB, state: FSMCo
     in_group = is_group_chat(query.message.chat)
     group = await resolve_group(query.from_user.id, query.message.chat)
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(
+        await edit_screen(query, bot,
             "🏠 <b>Головне меню</b>",
             reply_markup=get_main_menu(group["group_id"] if group else None, callback_data.owner, in_group),
         )
@@ -141,19 +184,19 @@ async def cb_main_menu(query: CallbackQuery, callback_data: MenuCB, state: FSMCo
 
 
 @router.callback_query(MenuCB.filter(F.action == "set_group"))
-async def cb_set_group(query: CallbackQuery, state: FSMContext):
+async def cb_set_group(query: CallbackQuery, state: FSMContext, bot: Bot):
     if await dm_only(query):
         return
     untrack_live_view(query.message.chat.id)
     await state.set_state(BotStates.wait_group)
     await state.update_data(msg_id=query.message.message_id)
     with suppress(TelegramBadRequest):
-        await query.message.edit_text("Введи точну назву групи (наприклад, ІЦ-12):", reply_markup=get_cancel_menu())
+        await edit_screen(query, bot, "Введи точну назву групи (наприклад, ІЦ-12):", reply_markup=get_cancel_menu())
     await query.answer()
 
 
 @router.callback_query(MenuCB.filter(F.action == "refresh"))
-async def cb_refresh(query: CallbackQuery, callback_data: MenuCB):
+async def cb_refresh(query: CallbackQuery, callback_data: MenuCB, bot: Bot):
     if await deny_foreign(query, callback_data):
         return
     in_group = is_group_chat(query.message.chat)
@@ -167,14 +210,14 @@ async def cb_refresh(query: CallbackQuery, callback_data: MenuCB):
     await query.answer("✅ Оновлено!")
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(
+        await edit_screen(query, bot,
             f"🏠 <b>Головне меню</b>\n<i>🔄 Оновлено о {now_str}</i>",
             reply_markup=get_main_menu(group["group_id"], callback_data.owner, in_group),
         )
 
 
 @router.callback_query(MenuCB.filter(F.action == "now"))
-async def cb_what_now(query: CallbackQuery, callback_data: MenuCB):
+async def cb_what_now(query: CallbackQuery, callback_data: MenuCB, bot: Bot):
     if await deny_foreign(query, callback_data):
         return
     untrack_live_view(query.message.chat.id)
@@ -191,7 +234,7 @@ async def cb_what_now(query: CallbackQuery, callback_data: MenuCB):
         rich_msg = InputRichMessage(blocks=[InputRichBlockParagraph(text="❌ Помилка API")])
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(
+        await edit_screen(query, bot,
             text="Твій розклад (Rich Messages не підтримуються клієнтом)",
             rich_message=rich_msg,
             reply_markup=get_main_menu(group["group_id"], callback_data.owner, in_group),
@@ -201,7 +244,7 @@ async def cb_what_now(query: CallbackQuery, callback_data: MenuCB):
 
 
 @router.callback_query(DayCB.filter())
-async def cb_day(query: CallbackQuery, callback_data: DayCB):
+async def cb_day(query: CallbackQuery, callback_data: DayCB, bot: Bot):
     if await deny_foreign(query, callback_data):
         return
     in_group = is_group_chat(query.message.chat)
@@ -218,7 +261,7 @@ async def cb_day(query: CallbackQuery, callback_data: DayCB):
         rich_msg = InputRichMessage(blocks=[InputRichBlockParagraph(text="❌ Помилка API")])
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(
+        await edit_screen(query, bot,
             text="Твій розклад (Rich Messages не підтримуються клієнтом)",
             rich_message=rich_msg,
             reply_markup=get_main_menu(group["group_id"], callback_data.owner, in_group),
@@ -233,7 +276,7 @@ async def cb_day(query: CallbackQuery, callback_data: DayCB):
 
 
 @router.callback_query(WeekCB.filter())
-async def cb_week(query: CallbackQuery, callback_data: WeekCB):
+async def cb_week(query: CallbackQuery, callback_data: WeekCB, bot: Bot):
     if await deny_foreign(query, callback_data):
         return
     in_group = is_group_chat(query.message.chat)
@@ -258,7 +301,7 @@ async def cb_week(query: CallbackQuery, callback_data: WeekCB):
     wt = "first" if get_week_type(target_date) == "scheduleFirstWeek" else "second"
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(
+        await edit_screen(query, bot,
             text="Твій розклад (Rich Messages не підтримуються клієнтом)",
             rich_message=rich_msg,
             reply_markup=week_nav_keyboard(wt, callback_data.owner),
@@ -278,7 +321,7 @@ async def cb_week(query: CallbackQuery, callback_data: WeekCB):
 
 
 @router.callback_query(FilterCB.filter())
-async def cb_filter_subjects(query: CallbackQuery, callback_data: FilterCB):
+async def cb_filter_subjects(query: CallbackQuery, callback_data: FilterCB, bot: Bot):
     if await deny_foreign(query, callback_data):
         return
     untrack_live_view(query.message.chat.id)
@@ -336,14 +379,14 @@ async def cb_filter_subjects(query: CallbackQuery, callback_data: FilterCB):
     )
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(text, reply_markup=builder.as_markup())
+        await edit_screen(query, bot, text, reply_markup=builder.as_markup())
     if callback_data.action != "toggle":
         await query.answer()
 
 
 
 @router.callback_query(LinkSubjCB.filter(F.idx == -1))
-async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB):
+async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB, bot: Bot):
     if await dm_only(query):
         return
     untrack_live_view(query.message.chat.id)
@@ -379,7 +422,7 @@ async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB)
     builder.row(InlineKeyboardButton(text="🏠 Головне меню", callback_data=MenuCB(action="main").pack()))
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(
+        await edit_screen(query, bot,
             "🔗 Обери предмет для налаштування посилання:\n"
             "<i>(показані лише ті, що активні в «Моїх предметах»)</i>",
             reply_markup=builder.as_markup(),
@@ -388,7 +431,7 @@ async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB)
 
 
 @router.callback_query(LinkSubjCB.filter(F.idx >= 0))
-async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB):
+async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB, bot: Bot):
     if await dm_only(query):
         return
     group = await resolve_group(query.from_user.id, query.message.chat)
@@ -412,13 +455,13 @@ async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB
     builder.adjust(1)
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(f"📚 <b>{safe_subject}</b>\nОбери тип заняття:",
+        await edit_screen(query, bot, f"📚 <b>{safe_subject}</b>\nОбери тип заняття:",
                                       reply_markup=builder.as_markup())
     await query.answer()
 
 
 @router.callback_query(LinkTypeCB.filter())
-async def cb_link_edit(query: CallbackQuery, callback_data: LinkTypeCB, state: FSMContext):
+async def cb_link_edit(query: CallbackQuery, callback_data: LinkTypeCB, state: FSMContext, bot: Bot):
     if await dm_only(query):
         return
     group = await resolve_group(query.from_user.id, query.message.chat)
@@ -443,7 +486,7 @@ async def cb_link_edit(query: CallbackQuery, callback_data: LinkTypeCB, state: F
             f"🔗 <b>{safe_subject}</b> ({callback_data.pair_type})\n\nПосилання не задано. Надішли його повідомленням.")
 
     with suppress(TelegramBadRequest):
-        await query.message.edit_text(text, reply_markup=get_cancel_menu())
+        await edit_screen(query, bot, text, reply_markup=get_cancel_menu())
     await query.answer()
 
 

@@ -26,13 +26,17 @@ async def main():
         [BotCommand(command="start", description="Головне меню")],
         scope=BotCommandScopeAllPrivateChats(),
     )
-    await bot.set_my_commands(
-        [
-            BotCommand(command="menu", description="Відкрити меню розкладу"),
-            BotCommand(command="setgroup", description="Адмін: задати групу чату, напр. /setgroup ІЦ-12"),
-        ],
-        scope=BotCommandScopeAllGroupChats(),
-    )
+    try:
+        await bot.set_my_commands(
+            [
+                BotCommand(command="menu", description="Відкрити меню розкладу (бачиш тільки ти)",
+                           is_ephemeral=True),
+                BotCommand(command="setgroup", description="Адмін: задати групу чату, напр. /setgroup ІЦ-12"),
+            ],
+            scope=BotCommandScopeAllGroupChats(),
+        )
+    except Exception:
+        logging.exception("Не вдалось зареєструвати ephemeral-команди для груп")
     dp = Dispatcher()
     dp.include_router(router)
 
