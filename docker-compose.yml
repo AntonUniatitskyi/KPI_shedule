@@ -9,6 +9,7 @@ services:
       - ./data:/app/data
     environment:
       - TZ=Europe/Kyiv
+    mem_limit: 500m
     logging:
       driver: json-file
       options:
