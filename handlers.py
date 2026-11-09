@@ -6,7 +6,7 @@ from html import escape
 from urllib.parse import urlparse
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -25,6 +25,7 @@ from api import api_get_all_groups, get_all_group_subjects, get_schedule
 from callbacks import BotStates, DayCB, FilterCB, LinkSubjCB, LinkTypeCB, MenuCB, WeekCB
 from config import TYPE_ICONS, now_kyiv
 from db import (
+    get_chats_for_group,
     get_hidden_subjects,
     get_link,
     is_group_chat,
@@ -93,6 +94,23 @@ async def send_menu(message: Message, bot: Bot, text: str, reply_markup: InlineK
         except TelegramBadRequest as e:
             logging.warning("Ephemeral-відповідь не вдалась, надсилаю звичайну: %s", e)
     await message.reply(text, reply_markup=reply_markup)
+
+
+async def is_group_admin(bot: Bot, user_id: int, group_id: int) -> bool:
+    for chat_id in await get_chats_for_group(group_id):
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+        except TelegramAPIError:
+            continue  # бота прибрали з чату або чат недоступний
+        if member.status in ("creator", "administrator"):
+            return True
+    return False
+
+
+async def link_subjects(user_id: int, group_id: int, shared: bool) -> list[str]:
+    if shared:
+        return await get_all_group_subjects(group_id)
+    return await get_visible_subjects(user_id, group_id)
 
 
 async def deny_foreign(query: CallbackQuery, callback_data) -> bool:
@@ -229,7 +247,8 @@ async def cb_what_now(query: CallbackQuery, callback_data: MenuCB, bot: Bot):
     schedule = await get_schedule(group["group_id"])
 
     if schedule:
-        rich_msg = await get_what_now(schedule, now_kyiv(), group["group_id"], query.from_user.id)
+        rich_msg = await get_what_now(schedule, now_kyiv(), group["group_id"], query.from_user.id,
+                                     include_shared=in_group)
     else:
         rich_msg = InputRichMessage(blocks=[InputRichBlockParagraph(text="❌ Помилка API")])
 
@@ -256,7 +275,8 @@ async def cb_day(query: CallbackQuery, callback_data: DayCB, bot: Bot):
     schedule = await get_schedule(group["group_id"])
 
     if schedule:
-        rich_msg = await format_day(schedule, target_date, group["group_id"], query.from_user.id)
+        rich_msg = await format_day(schedule, target_date, group["group_id"], query.from_user.id,
+                                    include_shared=in_group)
     else:
         rich_msg = InputRichMessage(blocks=[InputRichBlockParagraph(text="❌ Помилка API")])
 
@@ -294,7 +314,8 @@ async def cb_week(query: CallbackQuery, callback_data: WeekCB, bot: Bot):
     schedule = await get_schedule(group["group_id"])
 
     if schedule:
-        rich_msg = await format_week(schedule, target_date, group["group_id"], query.from_user.id)
+        rich_msg = await format_week(schedule, target_date, group["group_id"], query.from_user.id,
+                                     include_shared=in_group)
     else:
         rich_msg = InputRichMessage(blocks=[InputRichBlockParagraph(text="❌ Помилка API")])
 
@@ -394,7 +415,13 @@ async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB,
     if not group:
         return await query.answer(no_group_text(False), show_alert=True)
 
-    subjects = await get_visible_subjects(query.from_user.id, group["group_id"])
+    shared = bool(callback_data.shared)
+    if shared and not await is_group_admin(bot, query.from_user.id, group["group_id"]):
+        return await query.answer(
+            "Спільні лінки може задавати тільки адмін чату, привʼязаного до твоєї групи.", show_alert=True
+        )
+
+    subjects = await link_subjects(query.from_user.id, group["group_id"], shared)
     if not subjects:
         return await query.answer(
             "Усі предмети приховані. Зайди в «Мої предмети», щоб щось увімкнути.", show_alert=True
@@ -404,29 +431,36 @@ async def cb_link_subjects_list(query: CallbackQuery, callback_data: LinkSubjCB,
     PAGE_SIZE = 7
     start = page * PAGE_SIZE
     chunk = subjects[start:start + PAGE_SIZE]
+    sh = int(shared)
 
     builder = InlineKeyboardBuilder()
     for s in chunk:
         subj_id = zlib.crc32(s.encode())
-        builder.button(text=s[:35], callback_data=LinkSubjCB(page=page, idx=subj_id))
+        builder.button(text=s[:35], callback_data=LinkSubjCB(page=page, idx=subj_id, shared=sh))
     builder.adjust(1)
 
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=LinkSubjCB(page=page - 1, idx=-1).pack()))
+        nav_buttons.append(InlineKeyboardButton(
+            text="⬅️", callback_data=LinkSubjCB(page=page - 1, idx=-1, shared=sh).pack()))
     nav_buttons.append(InlineKeyboardButton(text=f"Стор. {page + 1}", callback_data="noop"))
     if start + PAGE_SIZE < len(subjects):
-        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=LinkSubjCB(page=page + 1, idx=-1).pack()))
+        nav_buttons.append(InlineKeyboardButton(
+            text="➡️", callback_data=LinkSubjCB(page=page + 1, idx=-1, shared=sh).pack()))
 
     builder.row(*nav_buttons)
     builder.row(InlineKeyboardButton(text="🏠 Головне меню", callback_data=MenuCB(action="main").pack()))
 
+    if shared:
+        title = ("👥 <b>Спільні лінки групи</b>\n"
+                 "Їх бачать усі в чаті, у кого немає особистого лінка на цей предмет.\n"
+                 "Обери предмет:")
+    else:
+        title = ("🔗 Обери предмет для налаштування посилання:\n"
+                 "<i>(показані лише ті, що активні в «Моїх предметах»)</i>")
+
     with suppress(TelegramBadRequest):
-        await edit_screen(query, bot,
-            "🔗 Обери предмет для налаштування посилання:\n"
-            "<i>(показані лише ті, що активні в «Моїх предметах»)</i>",
-            reply_markup=builder.as_markup(),
-        )
+        await edit_screen(query, bot, title, reply_markup=builder.as_markup())
     await query.answer()
 
 
@@ -437,26 +471,35 @@ async def cb_link_subject_detail(query: CallbackQuery, callback_data: LinkSubjCB
     group = await resolve_group(query.from_user.id, query.message.chat)
     if not group:
         return await query.answer(no_group_text(False), show_alert=True)
-    subjects = await get_visible_subjects(query.from_user.id, group["group_id"])
+
+    shared = bool(callback_data.shared)
+    if shared and not await is_group_admin(bot, query.from_user.id, group["group_id"]):
+        return await query.answer("Спільні лінки може задавати тільки адмін чату.", show_alert=True)
+
+    subjects = await link_subjects(query.from_user.id, group["group_id"], shared)
     subject = get_subject_by_id(subjects, callback_data.idx)
     if not subject:
         return await query.answer("Список змінився, відкрий ще раз", show_alert=True)
 
     safe_subject = escape(subject, quote=False)
+    owner_id = 0 if shared else query.from_user.id
+    sh = int(shared)
 
     builder = InlineKeyboardBuilder()
     for p_type, icon in TYPE_ICONS.items():
-        exists = await get_link(query.from_user.id, group["group_id"], subject, p_type)
+        exists = await get_link(owner_id, group["group_id"], subject, p_type)
         mark = "✅" if exists else "➕"
         builder.button(text=f"{icon} {p_type} {mark}",
-                       callback_data=LinkTypeCB(idx=callback_data.idx, pair_type=p_type))
+                       callback_data=LinkTypeCB(idx=callback_data.idx, pair_type=p_type, shared=sh))
 
-    builder.button(text="⬅️ Назад до списку", callback_data=LinkSubjCB(page=callback_data.page, idx=-1))
+    builder.button(text="⬅️ Назад до списку",
+                   callback_data=LinkSubjCB(page=callback_data.page, idx=-1, shared=sh))
     builder.adjust(1)
 
+    prefix = "👥 " if shared else "📚 "
     with suppress(TelegramBadRequest):
-        await edit_screen(query, bot, f"📚 <b>{safe_subject}</b>\nОбери тип заняття:",
-                                      reply_markup=builder.as_markup())
+        await edit_screen(query, bot, f"{prefix}<b>{safe_subject}</b>\nОбери тип заняття:",
+                          reply_markup=builder.as_markup())
     await query.answer()
 
 
@@ -467,23 +510,32 @@ async def cb_link_edit(query: CallbackQuery, callback_data: LinkTypeCB, state: F
     group = await resolve_group(query.from_user.id, query.message.chat)
     if not group:
         return await query.answer(no_group_text(False), show_alert=True)
-    subjects = await get_visible_subjects(query.from_user.id, group["group_id"])
+
+    shared = bool(callback_data.shared)
+    if shared and not await is_group_admin(bot, query.from_user.id, group["group_id"]):
+        return await query.answer("Спільні лінки може задавати тільки адмін чату.", show_alert=True)
+
+    subjects = await link_subjects(query.from_user.id, group["group_id"], shared)
     subject = get_subject_by_id(subjects, callback_data.idx)
     if not subject:
         return await query.answer("Список змінився, відкрий ще раз", show_alert=True)
 
-    link = await get_link(query.from_user.id, group["group_id"], subject, callback_data.pair_type)
+    owner_id = 0 if shared else query.from_user.id
+    link = await get_link(owner_id, group["group_id"], subject, callback_data.pair_type)
 
     await state.set_state(BotStates.wait_link)
-    await state.update_data(subject=subject, pair_type=callback_data.pair_type, msg_id=query.message.message_id)
+    await state.update_data(subject=subject, pair_type=callback_data.pair_type,
+                            msg_id=query.message.message_id, shared=shared)
 
     safe_subject = escape(subject, quote=False)
     safe_link = escape(link, quote=False) if link else None
+    kind = "👥 Спільне посилання" if shared else "🔗"
+    head = f"{kind} <b>{safe_subject}</b> ({callback_data.pair_type})"
 
-    text = (f"🔗 <b>{safe_subject}</b> ({callback_data.pair_type})\n\nПоточне: <code>{safe_link}</code>\n\n"
+    text = (f"{head}\n\nПоточне: <code>{safe_link}</code>\n\n"
             f"Надішли нове посилання або <code>-</code> щоб видалити."
             if link else
-            f"🔗 <b>{safe_subject}</b> ({callback_data.pair_type})\n\nПосилання не задано. Надішли його повідомленням.")
+            f"{head}\n\nПосилання не задано. Надішли його повідомленням.")
 
     with suppress(TelegramBadRequest):
         await edit_screen(query, bot, text, reply_markup=get_cancel_menu())
@@ -564,8 +616,20 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
             return
 
         subject, pair_type = data["subject"], data["pair_type"]
+        shared = bool(data.get("shared"))
 
-        await set_link(message.from_user.id, group["group_id"], subject, pair_type, text)
+        if shared and not await is_group_admin(bot, message.from_user.id, group["group_id"]):
+            await state.clear()
+            with suppress(TelegramBadRequest):
+                await bot.edit_message_text(
+                    "⛔ Спільні лінки може задавати тільки адмін чату.",
+                    chat_id=message.chat.id,
+                    message_id=msg_id,
+                    reply_markup=get_main_menu(group["group_id"]),
+                )
+            return
+
+        await set_link(message.from_user.id, group["group_id"], subject, pair_type, text, shared=shared)
         await state.clear()
 
         builder = InlineKeyboardBuilder()

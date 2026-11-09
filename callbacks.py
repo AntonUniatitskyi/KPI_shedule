@@ -26,12 +26,14 @@ class LinkSubjCB(CallbackData, prefix="lsub"):
     page: int
     idx: int = -1
     owner: int = 0
+    shared: int = 0  # 1 — спільні лінки групи (тільки адмін)
 
 
 class LinkTypeCB(CallbackData, prefix="ltp"):
     idx: int
     pair_type: str
     owner: int = 0
+    shared: int = 0
 
 
 class FilterCB(CallbackData, prefix="fltr"):

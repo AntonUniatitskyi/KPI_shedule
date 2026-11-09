@@ -29,7 +29,6 @@ async def _migrate_links(db):
         ) as cur:
             has_old = await cur.fetchone()
         if has_old:
-            # старые ссылки становятся общими; в ЛС они не показываются
             await db.execute('''
                              INSERT INTO subject_links (group_id, subject_name, pair_type, owner_id, url, set_by)
                              SELECT group_id, subject_name, pair_type, 0, url, NULL
@@ -101,6 +100,12 @@ async def set_chat_group(chat_id: int, group_name: str, group_id: int, set_by: i
             "INSERT OR REPLACE INTO chat_groups (chat_id, group_name, group_id, set_by) VALUES (?, ?, ?, ?)",
             (chat_id, group_name, group_id, set_by))
         await db.commit()
+
+
+async def get_chats_for_group(group_id: int) -> list[int]:
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT chat_id FROM chat_groups WHERE group_id = ?", (group_id,)) as cursor:
+            return [r[0] for r in await cursor.fetchall()]
 
 
 def is_group_chat(chat) -> bool:
