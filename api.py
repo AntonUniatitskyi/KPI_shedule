@@ -14,6 +14,36 @@ _session: aiohttp.ClientSession | None = None
 _cache: dict[str, tuple[object, float]] = {}   # key -> (дані, monotonic-час збереження)
 _locks: dict[str, asyncio.Lock] = {}
 _last_refresh_try: dict[int, float] = {}       # group_id -> час останньої спроби примусового оновлення
+API_DOWN_THRESHOLD = 5
+_fail_streak = 0
+_alert_handler = None
+_alert_tasks: set[asyncio.Task] = set()
+
+def set_alert_handler(handler):
+    global _alert_handler
+    _alert_handler = handler
+
+
+
+def _alert(text: str):
+    if _alert_handler is None:
+        return
+    task = asyncio.create_task(_alert_handler(text))
+    _alert_tasks.add(task)
+    task.add_done_callback(_alert_tasks.discard)
+
+
+def _note_result(ok: bool):
+    global _fail_streak
+    if ok:
+        if _fail_streak >= API_DOWN_THRESHOLD:
+            _alert("✅ API розкладу знову працює")
+        _fail_streak = 0
+    else:
+        _fail_streak += 1
+        if _fail_streak == API_DOWN_THRESHOLD:
+            _alert(f"🔴 API розкладу недоступне ({API_DOWN_THRESHOLD} невдалих запитів поспіль). "
+                   "Бот віддає дані з кешу.")
 
 
 def _get_session() -> aiohttp.ClientSession:
@@ -38,10 +68,14 @@ async def fetch_json(url: str):
         async with _get_session().get(url) as resp:
             if resp.status != 200:
                 logging.warning("API %s повернув HTTP %s", url, resp.status)
+                _note_result(False)
                 return None
-            return await resp.json(content_type=None)
+            data = await resp.json(content_type=None)
+            _note_result(True)
+            return data
     except Exception as e:
         logging.error("API помилка для %s: %r", url, e)
+        _note_result(False)
         return None
 
 
@@ -131,3 +165,7 @@ async def get_all_group_subjects(group_id: int) -> list[str]:
                 if p.get("name"):
                     subjects.add(p["name"])
     return sorted(subjects)
+
+
+def api_status() -> dict:
+    return {"fail_streak": _fail_streak, "cached": len(_cache)}

@@ -51,6 +51,7 @@ async def cb_set_group(query: CallbackQuery, state: FSMContext, bot: Bot):
 async def cb_refresh(query: CallbackQuery, callback_data: MenuCB, bot: Bot):
     if await deny_foreign(query, callback_data):
         return
+    untrack_live_view(query.message.chat.id)
     in_group = is_group_chat(query.message.chat)
     group = await resolve_group(query.from_user.id, query.message.chat)
     if not group:
@@ -120,7 +121,11 @@ async def cb_day(query: CallbackQuery, callback_data: DayCB, bot: Bot):
     if not group:
         return await query.answer(no_group_text(in_group), show_alert=True)
 
-    target_date = now_kyiv() if callback_data.target == "today" else now_kyiv() + timedelta(days=1)
+    target_date = now_kyiv()
+    if callback_data.target == "tomorrow":
+        target_date += timedelta(days=1)
+        if target_date.weekday() == 6:
+            target_date += timedelta(days=1)
     schedule = await get_schedule(group["group_id"])
 
     if schedule:

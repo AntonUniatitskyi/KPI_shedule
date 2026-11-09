@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, time as dtime, timedelta
 
 from aiogram import Bot
@@ -9,16 +10,20 @@ from aiogram.types import LinkPreviewOptions
 from access import cached_is_admin
 from api import get_schedule
 from config import KPI_BELLS, now_kyiv, TZ
+from db import save_live_views
 from formatting import format_day, format_week, get_week_type
 from keyboards import get_main_menu, week_nav_keyboard
 from notifier import format_error, notify_admin
 
 LIVE_VIEWS: dict[int, dict] = {}
+LIVE_TTL = 12 * 3600   # отключаем автообновление, если человек не заходил 12 часов
+CONCURRENCY = 5        # небольшой параллелизм: бережём и RAM, и лимиты Telegram
 
 
 def track_live_view(chat_id: int, message_id: int, kind: str, group_id: int, user_id: int):
     LIVE_VIEWS[chat_id] = {
-        "message_id": message_id, "kind": kind, "group_id": group_id, "user_id": user_id,
+        "message_id": message_id, "kind": kind, "group_id": group_id,
+        "user_id": user_id, "ts": time.time(),
     }
 
 
@@ -40,7 +45,7 @@ def next_wake_time(now: datetime) -> datetime:
 async def live_view_updater(bot: Bot):
     while True:
         now = now_kyiv()
-        wake_at = next_wake_time(now)
+        wake_at = next_wake_time(now) + timedelta(seconds=1)  # +1 с, чтобы точно пройти границу пары
         await asyncio.sleep(max((wake_at - now).total_seconds(), 5))
         try:
             await _refresh_all_live_views(bot)
@@ -51,54 +56,71 @@ async def live_view_updater(bot: Bot):
 
 
 async def _refresh_all_live_views(bot: Bot):
+    sem = asyncio.Semaphore(CONCURRENCY)
+    now_ts = time.time()
+
+    async def worker(chat_id: int, info: dict):
+        async with sem:
+            await _refresh_one(bot, chat_id, info)
+            await asyncio.sleep(0.1)
+
+    jobs = []
     for chat_id, info in list(LIVE_VIEWS.items()):
-        try:
-            schedule = await get_schedule(info["group_id"])
-            if not schedule:
-                continue
-
-            now = now_kyiv()
-            if info["kind"] == "today":
-                rich_msg = await format_day(schedule, now, info["group_id"], info["user_id"])
-                markup = get_main_menu(
-                    info["group_id"],
-                    show_shared=cached_is_admin(info["user_id"], info["group_id"]),
-                )
-            else:  # week_current
-                rich_msg = await format_week(schedule, now, info["group_id"], info["user_id"])
-                wt = "first" if get_week_type(now) == "scheduleFirstWeek" else "second"
-                markup = week_nav_keyboard(wt)
-
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=info["message_id"],
-                    text="Твій розклад (Rich Messages не підтримуються клієнтом)",
-                    rich_message=rich_msg,
-                    reply_markup=markup,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                )
-            except TelegramRetryAfter as e:
-                logging.warning(f"Rate limit: чекаємо {e.retry_after} секунд...")
-                await asyncio.sleep(e.retry_after)
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=info["message_id"],
-                    text="Твій розклад (Rich Messages не підтримуються клієнтом)",
-                    rich_message=rich_msg,
-                    reply_markup=markup,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                )
-        except TelegramForbiddenError:
-            logging.info(f"Користувач {chat_id} заблокував бота. Відв'язуємо live view.")
+        if now_ts - info.get("ts", 0) > LIVE_TTL:
             untrack_live_view(chat_id)
-        except TelegramBadRequest as e:
-            if "message is not modified" in e.message:
-                pass
-            elif "message to edit not found" in e.message or "message can't be edited" in e.message:
-                untrack_live_view(chat_id)
-            else:
-                logging.exception(f"Неочікуваний BadRequest для {chat_id}: {e.message}")
-        except Exception:
-            logging.exception(f"Помилка оновлення live view для {chat_id}")
-        await asyncio.sleep(0.1)
+            continue
+        jobs.append(worker(chat_id, info))
+
+    await asyncio.gather(*jobs)
+    try:
+        await save_live_views(LIVE_VIEWS)
+    except Exception:
+        logging.exception("Не вдалось зберегти live views")
+
+
+async def _refresh_one(bot: Bot, chat_id: int, info: dict):
+    try:
+        schedule = await get_schedule(info["group_id"])
+        if not schedule:
+            return
+
+        now = now_kyiv()
+        if info["kind"] == "today":
+            rich_msg = await format_day(schedule, now, info["group_id"], info["user_id"])
+            markup = get_main_menu(
+                info["group_id"],
+                show_shared=cached_is_admin(info["user_id"], info["group_id"]),
+            )
+        else:  # week_current
+            rich_msg = await format_week(schedule, now, info["group_id"], info["user_id"])
+            wt = "first" if get_week_type(now) == "scheduleFirstWeek" else "second"
+            markup = week_nav_keyboard(wt)
+
+        async def send():
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=info["message_id"],
+                text="Твій розклад (Rich Messages не підтримуються клієнтом)",
+                rich_message=rich_msg,
+                reply_markup=markup,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+
+        try:
+            await send()
+        except TelegramRetryAfter as e:
+            logging.warning("Rate limit: чекаємо %s секунд...", e.retry_after)
+            await asyncio.sleep(e.retry_after)
+            await send()
+    except TelegramForbiddenError:
+        logging.info("Користувач %s заблокував бота. Відв'язуємо live view.", chat_id)
+        untrack_live_view(chat_id)
+    except TelegramBadRequest as e:
+        if "message is not modified" in e.message:
+            pass
+        elif "message to edit not found" in e.message or "message can't be edited" in e.message:
+            untrack_live_view(chat_id)
+        else:
+            logging.exception("Неочікуваний BadRequest для %s: %s", chat_id, e.message)
+    except Exception:
+        logging.exception("Помилка оновлення live view для %s", chat_id)

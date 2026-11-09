@@ -69,6 +69,17 @@ async def init_db():
                              PRIMARY KEY (user_key, group_id, subject_name)
                              )
                          ''')
+        await db.execute('''
+                         CREATE TABLE IF NOT EXISTS live_views
+                         (
+                             chat_id    INTEGER PRIMARY KEY,
+                             message_id INTEGER,
+                             kind       TEXT,
+                             group_id   INTEGER,
+                             user_id    INTEGER,
+                             ts         REAL
+                         )
+                         ''')
         await db.commit()
 
 
@@ -196,3 +207,43 @@ async def set_link(user_id: int, group_id: int, subject: str, pair_type: str,
                 "(group_id, subject_name, pair_type, owner_id, url, set_by) VALUES (?, ?, ?, ?, ?, ?)",
                 (group_id, subject, pair_type, owner, url, user_id))
         await db.commit()
+
+
+async def load_live_views() -> dict[int, dict]:
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+                "SELECT chat_id, message_id, kind, group_id, user_id, ts FROM live_views") as cur:
+            return {
+                r[0]: {"message_id": r[1], "kind": r[2], "group_id": r[3], "user_id": r[4], "ts": r[5]}
+                for r in await cur.fetchall()
+            }
+
+
+async def save_live_views(views: dict[int, dict]):
+    rows = [(cid, v["message_id"], v["kind"], v["group_id"], v["user_id"], v.get("ts", 0))
+            for cid, v in list(views.items())]
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM live_views")
+        await db.executemany("INSERT INTO live_views VALUES (?, ?, ?, ?, ?, ?)", rows)
+        await db.commit()
+
+
+async def get_stats() -> dict:
+    async with aiosqlite.connect(DB_NAME) as db:
+        async def one(q: str) -> int:
+            async with db.execute(q) as cur:
+                return (await cur.fetchone())[0]
+
+        async with db.execute(
+                "SELECT group_name, COUNT(*) c FROM user_groups "
+                "GROUP BY group_id ORDER BY c DESC LIMIT 5") as cur:
+            top = await cur.fetchall()
+
+        return {
+            "users": await one("SELECT COUNT(*) FROM user_groups"),
+            "groups": await one("SELECT COUNT(DISTINCT group_id) FROM user_groups"),
+            "chats": await one("SELECT COUNT(*) FROM chat_groups"),
+            "links": await one("SELECT COUNT(*) FROM subject_links"),
+            "with_hidden": await one("SELECT COUNT(DISTINCT user_key) FROM user_hidden_subjects"),
+            "top_groups": top,
+        }

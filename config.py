@@ -1,6 +1,7 @@
 import os
 from datetime import date, datetime, time as dtime
 from zoneinfo import ZoneInfo
+import time
 
 import decouple
 
@@ -10,7 +11,7 @@ ADMIN_ID = int(decouple.config("ADMIN_ID", default=0))
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_NAME = os.path.join(DATA_DIR, "bot_data.db")
-
+START_TS = time.time()
 CACHE_TTL = 300
 GROUPS_TTL = 3600
 STALE_MAX_AGE = 24 * 3600

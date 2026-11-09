@@ -31,6 +31,9 @@ def short_name(full_name: str) -> str:
     parts = full_name.split()
     return f"{parts[0]} {parts[1][0]}." if len(parts) >= 2 else full_name
 
+def pair_time(pair: dict) -> str:
+    return (pair.get("time") or "")[:5]
+
 
 def is_pair_relevant(pair: dict, target_date: datetime) -> bool:
     dates = pair.get("dates", [])
@@ -43,7 +46,7 @@ def get_week_type(date: datetime) -> str:
 def get_active_pair_time(now: datetime) -> str | None:
     t = now.time()
     for start, end, _ in KPI_BELLS:
-        if start <= t <= end:
+        if start <= t < end:
             return start.strftime("%H:%M")
     return None
 
@@ -64,7 +67,7 @@ async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bo
     icon = TYPE_ICONS.get(pair_type, "📘")
     link = await get_link(user_id, group_id, subject, pair_type, include_shared)
 
-    time_text = f"🟢 {pair['time'][:5]}" if is_active else pair["time"][:5]
+    time_text = f"🟢 {pair_time(pair)}" if is_active else (pair_time(pair) or "—")
 
     time_cell = RichBlockTableCell(text=time_text, align="center", valign="middle")
 
@@ -110,10 +113,10 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
         ])
         return InputRichMessage(blocks=blocks)
 
-    day = next((d for d in schedule.get(week_key, []) if d["day"] == day_key), None)
+    day = next((d for d in schedule.get(week_key, []) if d.get("day") == day_key), None)
     blocks.append(InputRichBlockSectionHeading(text=f"📅 {DAY_NAMES[day_key]}", size=1))
 
-    if not day or not day["pairs"]:
+    if not day or not day.get("pairs"):
         blocks.append(InputRichBlockParagraph(text="🎉 Пар немає"))
         return InputRichMessage(blocks=blocks)
 
@@ -126,7 +129,7 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
 
     active_time = get_active_pair_time(now_kyiv()) if date.date() == now_kyiv().date() else None
     rows = [
-        await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time),
+        await create_pair_row(pair, group_id, user_id, is_active=(pair_time(pair) == active_time),
                               include_shared=include_shared)
         for pair in valid_pairs
     ]
@@ -151,8 +154,8 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
 
     for day_idx in range(6):
         day_key = DAYS_MAP[day_idx]
-        day_data = next((d for d in days if d["day"] == day_key), None)
-        if not day_data or not day_data["pairs"]: continue
+        day_data = next((d for d in days if d.get("day") == day_key), None)
+        if not day_data or not day_data.get("pairs"): continue
 
         current_day_date = monday + timedelta(days=day_idx)
         valid_pairs = [p for p in day_data["pairs"] if
@@ -164,7 +167,7 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
         active_time = get_active_pair_time(now_kyiv()) if is_today else None
 
         rows = [
-            await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time),
+            await create_pair_row(pair, group_id, user_id, is_active=(pair_time(pair) == active_time),
                               include_shared=include_shared)
             for pair in valid_pairs
         ]
@@ -237,7 +240,7 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
         return InputRichMessage(blocks=[InputRichBlockParagraph(text="Не вдалося визначити час пар на сьогодні.")])
 
     now_time = now.time()
-    current_start = next((s for s, e, _, _ in spans if s <= now_time <= e), None)
+    current_start = next((s for s, e, _, _ in spans if s <= now_time < e), None)
 
     if current_start is not None:
         status, focus_start = "🟢 Зараз йде", current_start
