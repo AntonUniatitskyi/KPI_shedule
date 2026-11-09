@@ -11,11 +11,14 @@ ADMIN_ID = int(decouple.config("ADMIN_ID", default=0))
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_NAME = os.path.join(DATA_DIR, "bot_data.db")
+CACHE_DIR = os.path.join(DATA_DIR, "cache")
 START_TS = time.time()
 CACHE_TTL = 300
 GROUPS_TTL = 3600
-STALE_MAX_AGE = 24 * 3600
+STALE_MAX_AGE = 7 * 24 * 3600
 API_TIMEOUT = 5
+BLOCK_BACKOFF_MIN = 600
+BLOCK_BACKOFF_MAX = 7200
 REFRESH_COOLDOWN = 60
 
 SEMESTER_START = date(2026, 8, 31)
@@ -32,6 +35,7 @@ KPI_BELLS = [
 DAYS_MAP = {0: "Пн", 1: "Вв", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб"}
 DAY_NAMES = {"Пн": "Понеділок", "Вв": "Вівторок", "Ср": "Середа", "Чт": "Четвер", "Пт": "Пʼятниця", "Сб": "Субота"}
 TYPE_ICONS = {"Лек": "Лек.📖", "Прак": "Прак.🧪", "Лаб": "Лаб.🔬"}
+
 
 def now_kyiv() -> datetime:
     return datetime.now(TZ)
