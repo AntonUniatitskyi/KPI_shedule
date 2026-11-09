@@ -11,6 +11,7 @@ from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
+    ChatMemberUpdated,
     EphemeralMessageParameters,
     InlineKeyboardButton,
     InputRichBlockParagraph,
@@ -26,9 +27,11 @@ from api import api_get_all_groups, get_all_group_subjects, get_schedule, refres
 from callbacks import BotStates, DayCB, FilterCB, LinkSubjCB, LinkTypeCB, MenuCB, WeekCB
 from config import TYPE_ICONS, now_kyiv
 from db import (
+    delete_chat_group,
     get_hidden_subjects,
     get_link,
     is_group_chat,
+    migrate_chat_group,
     resolve_group,
     set_chat_group,
     set_group,
@@ -187,6 +190,32 @@ async def cmd_setgroup(message: Message, command: CommandObject, bot: Bot):
     await message.reply(f"✅ Чат привʼязано до групи <b>{safe_name}</b>. Відкрий меню: /menu")
 
 
+
+@router.my_chat_member()
+async def on_bot_membership_changed(event: ChatMemberUpdated, bot: Bot):
+    if not is_group_chat(event.chat):
+        return
+    old_status = event.old_chat_member.status
+    new_status = event.new_chat_member.status
+
+    if new_status in ("left", "kicked"):
+        await delete_chat_group(event.chat.id)
+        clear_admin_cache()
+        logging.info("Бота прибрали з чату %s — привʼязку до групи видалено", event.chat.id)
+    elif old_status in ("left", "kicked") and new_status in ("member", "administrator"):
+        with suppress(TelegramBadRequest):
+            await bot.send_message(
+                event.chat.id,
+                HELP_GROUP + "\n\n⚠️ Цей чат ще не привʼязаний до групи. "
+                             "Адмін має виконати <code>/setgroup ІЦ-12</code>.",
+            )
+
+
+@router.message(F.migrate_to_chat_id)
+async def on_chat_migrated(message: Message):
+    await migrate_chat_group(message.chat.id, message.migrate_to_chat_id)
+    clear_admin_cache()
+    logging.info("Чат %s став супергрупою %s — привʼязку перенесено", message.chat.id, message.migrate_to_chat_id)
 
 @router.callback_query(MenuCB.filter(F.action == "main"))
 async def cb_main_menu(query: CallbackQuery, callback_data: MenuCB, state: FSMContext, bot: Bot):
