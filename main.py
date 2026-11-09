@@ -11,6 +11,7 @@ from config import TOKEN
 from db import init_db
 from handlers import router
 from live_views import live_view_updater
+from notifier import notify_admin
 
 background_tasks: set[asyncio.Task] = set()
 
@@ -50,6 +51,7 @@ async def main():
     task.add_done_callback(background_tasks.discard)
 
     print("Бот запущений на aiogram v3 з підтримкою Rich Messages...")
+    await notify_admin(bot, "🟢 Бот запущено")
     try:
         await dp.start_polling(bot)
     finally:

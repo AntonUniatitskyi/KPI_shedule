@@ -6,6 +6,7 @@ import decouple
 
 TZ = ZoneInfo("Europe/Kyiv")
 TOKEN = str(decouple.config("TG_TOKEN"))
+ADMIN_ID = int(decouple.config("ADMIN_ID", default=0))
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_NAME = os.path.join(DATA_DIR, "bot_data.db")

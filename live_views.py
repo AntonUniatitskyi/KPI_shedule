@@ -11,6 +11,7 @@ from api import get_schedule
 from config import KPI_BELLS, now_kyiv, TZ
 from formatting import format_day, format_week, get_week_type
 from keyboards import get_main_menu, week_nav_keyboard
+from notifier import format_error, notify_admin
 
 LIVE_VIEWS: dict[int, dict] = {}
 
@@ -43,8 +44,10 @@ async def live_view_updater(bot: Bot):
         await asyncio.sleep(max((wake_at - now).total_seconds(), 5))
         try:
             await _refresh_all_live_views(bot)
-        except Exception:
+        except Exception as e:
             logging.exception("live_view_updater: цикл оновлення впав, продовжуємо далі")
+            await notify_admin(bot, "🔁 Фоновий цикл автооновлення впав (продовжує працювати)\n" + format_error(e),
+                               key="live_view_updater")
 
 
 async def _refresh_all_live_views(bot: Bot):
