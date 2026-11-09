@@ -186,6 +186,22 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
     return InputRichMessage(blocks=blocks)
 
 
+def _bell_name(start) -> str:
+    return next((n for s, _, n in KPI_BELLS if s == start), "Пара")
+
+
+def _pair_span(pair: dict):
+    raw = (pair.get("time") or "")[:5]
+    try:
+        start = datetime.strptime(raw, "%H:%M").time()
+    except ValueError:
+        return None
+    for s, e, _ in KPI_BELLS:
+        if s == start:
+            return s, e
+    return start, (datetime(2000, 1, 1, start.hour, start.minute) + timedelta(minutes=90)).time()
+
+
 async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: int,
                        include_shared: bool = False) -> InputRichMessage:
     blocks = []
@@ -210,37 +226,59 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
     if not available_pairs:
         return InputRichMessage(blocks=[InputRichBlockParagraph(text="На сьогодні твоїх пар немає. 🎉")])
 
+    spans = []
+    for p in available_pairs:
+        span = _pair_span(p)
+        if span:
+            spans.append((span[0], span[1], _bell_name(span[0]), p))
+    spans.sort(key=lambda x: x[0])
+
+    if not spans:
+        return InputRichMessage(blocks=[InputRichBlockParagraph(text="Не вдалося визначити час пар на сьогодні.")])
+
     now_time = now.time()
-    active_bell = next(((s, e, n) for s, e, n in KPI_BELLS if s <= now_time <= e), None)
-    status = "🟢 Зараз йде" if active_bell else "🟡 Наступна"
+    current_start = next((s for s, e, _, _ in spans if s <= now_time <= e), None)
 
-    if not active_bell:
-        active_bell = next(((s, e, n) for s, e, n in KPI_BELLS if now_time < s), None)
-    if not active_bell:
-        return InputRichMessage(blocks=[InputRichBlockParagraph(text="Всі пари на сьогодні вже закінчились! 🌙")])
+    if current_start is not None:
+        status, focus_start = "🟢 Зараз йде", current_start
+    else:
+        status = "🟡 Наступна"
+        focus_start = next((s for s, _, _, _ in spans if s > now_time), None)
 
-    start, end, pair_name = active_bell
-    target_start_str = start.strftime("%H:%M")
+    if focus_start is None:
+        return InputRichMessage(blocks=[InputRichBlockParagraph(text="Всі твої пари на сьогодні вже закінчились! 🌙")])
 
-    active_pair = next((p for p in available_pairs if p.get("time", "").startswith(target_start_str)), None)
+    group_pairs = [x for x in spans if x[0] == focus_start]
+    end = max(x[1] for x in group_pairs)
 
-    blocks.append(InputRichBlockSectionHeading(text=f"{status} {pair_name}", size=2))
-    blocks.append(InputRichBlockParagraph(text=f"🕒 {target_start_str} - {end.strftime('%H:%M')}"))
+    blocks.append(InputRichBlockSectionHeading(text=f"{status} {group_pairs[0][2]}", size=2))
+    blocks.append(InputRichBlockParagraph(text=f"🕒 {focus_start.strftime('%H:%M')} - {end.strftime('%H:%M')}"))
 
-    if not active_pair:
-        blocks.append(InputRichBlockParagraph(text="За твоїм вибором тут вікно. Час зробити каву! ☕"))
-        return InputRichMessage(blocks=blocks)
-
-    row_data = await create_pair_row(active_pair, group_id, user_id, include_shared=include_shared)
+    if current_start is None:
+        next_bell = next((s for s, _, _ in KPI_BELLS if s > now_time), None)
+        if next_bell is not None and focus_start > next_bell:
+            blocks.append(InputRichBlockParagraph(
+                text=f"☕ Найближчі пари за твоїм вибором — вікно, наступна о {focus_start.strftime('%H:%M')}"
+            ))
 
     custom_headers = ["Предмет", "Викладач", "Ауд.", "Лінк"]
     header_cells = [
         RichBlockTableCell(text=RichTextBold(text=h), is_header=True, align="center", valign="middle")
         for h in custom_headers
     ]
-
-    table_cells = [header_cells, row_data[1:]]
+    table_cells = [header_cells]
+    for _, _, _, pair in group_pairs:
+        row_data = await create_pair_row(pair, group_id, user_id, include_shared=include_shared)
+        table_cells.append(row_data[1:])
     blocks.append(InputRichBlockTable(cells=table_cells, is_striped=True, is_bordered=True))
+
+    if current_start is not None:
+        nxt = next((x for x in spans if x[0] > now_time), None)
+        if nxt:
+            s, _, _, pair = nxt
+            blocks.append(InputRichBlockParagraph(
+                text=f"⏭ Далі: {s.strftime('%H:%M')} — {pair.get('name', 'Невідомий предмет')} ({pair.get('type', '')})"
+            ))
 
     return InputRichMessage(blocks=blocks)
 
