@@ -6,6 +6,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import LinkPreviewOptions
 
+from access import cached_is_admin
 from api import get_schedule
 from config import KPI_BELLS, now_kyiv, TZ
 from formatting import format_day, format_week, get_week_type
@@ -56,7 +57,10 @@ async def _refresh_all_live_views(bot: Bot):
             now = now_kyiv()
             if info["kind"] == "today":
                 rich_msg = await format_day(schedule, now, info["group_id"], info["user_id"])
-                markup = get_main_menu(info["group_id"])
+                markup = get_main_menu(
+                    info["group_id"],
+                    show_shared=cached_is_admin(info["user_id"], info["group_id"]),
+                )
             else:  # week_current
                 rich_msg = await format_week(schedule, now, info["group_id"], info["user_id"])
                 wt = "first" if get_week_type(now) == "scheduleFirstWeek" else "second"

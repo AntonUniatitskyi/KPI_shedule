@@ -8,7 +8,8 @@ from config import now_kyiv
 LAST_REFRESH: dict[int, datetime] = {}
 
 
-def get_main_menu(group_id: int | None = None, owner: int = 0, in_group: bool = False):
+def get_main_menu(group_id: int | None = None, owner: int = 0, in_group: bool = False,
+                  show_shared: bool = False):
     refresh_label = "🔄 Оновити"
     if group_id and group_id in LAST_REFRESH:
         mins_ago = int((now_kyiv() - LAST_REFRESH[group_id]).total_seconds() // 60)
@@ -29,10 +30,12 @@ def get_main_menu(group_id: int | None = None, owner: int = 0, in_group: bool = 
         builder.adjust(1, 2, 2, 1, 1, 1)
     else:
         builder.button(text="🔗 Лінки", callback_data=LinkSubjCB(page=0))
-        builder.button(text="👥 Спільні лінки", callback_data=LinkSubjCB(page=0, shared=1))
+        if show_shared:
+            # кнопку бачать лише адміни привʼязаних чатів
+            builder.button(text="👥 Спільні лінки", callback_data=LinkSubjCB(page=0, shared=1))
         builder.button(text="📚 Задати групу", callback_data=MenuCB(action="set_group"))
         builder.button(text=refresh_label, callback_data=MenuCB(action="refresh"), style="success")
-        builder.adjust(1, 2, 2, 1, 2, 1, 2)
+        builder.adjust(*((1, 2, 2, 1, 2, 1, 2) if show_shared else (1, 2, 2, 1, 2, 2)))
     return builder.as_markup()
 
 

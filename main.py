@@ -23,7 +23,11 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     await bot.set_my_commands(
-        [BotCommand(command="start", description="Головне меню")],
+        [
+            BotCommand(command="start", description="Інструкція та меню"),
+            BotCommand(command="menu", description="Головне меню"),
+            BotCommand(command="help", description="Як користуватись ботом"),
+        ],
         scope=BotCommandScopeAllPrivateChats(),
     )
     try:
@@ -31,6 +35,7 @@ async def main():
             [
                 BotCommand(command="menu", description="Відкрити меню розкладу (бачиш тільки ти)",
                            is_ephemeral=True),
+                BotCommand(command="help", description="Як користуватись ботом", is_ephemeral=True),
                 BotCommand(command="setgroup", description="Адмін: задати групу чату, напр. /setgroup ІЦ-12"),
             ],
             scope=BotCommandScopeAllGroupChats(),

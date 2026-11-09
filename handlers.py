@@ -6,7 +6,7 @@ from html import escape
 from urllib.parse import urlparse
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -21,11 +21,11 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from access import clear_admin_cache, is_group_admin
 from api import api_get_all_groups, get_all_group_subjects, get_schedule
 from callbacks import BotStates, DayCB, FilterCB, LinkSubjCB, LinkTypeCB, MenuCB, WeekCB
 from config import TYPE_ICONS, now_kyiv
 from db import (
-    get_chats_for_group,
     get_hidden_subjects,
     get_link,
     is_group_chat,
@@ -45,6 +45,7 @@ from formatting import (
     normalize_group_name,
 )
 from keyboards import LAST_REFRESH, get_cancel_menu, get_main_menu, week_nav_keyboard
+from texts import HELP_DM, HELP_GROUP, SHORT_MENU_DM
 from live_views import track_live_view, untrack_live_view
 
 router = Router()
@@ -79,7 +80,7 @@ async def edit_screen(query: CallbackQuery, bot: Bot, text: str, *, rich_message
         await msg.edit_text(text, **kwargs)
 
 
-async def send_menu(message: Message, bot: Bot, text: str, reply_markup: InlineKeyboardMarkup):
+async def send_menu(message: Message, bot: Bot, text: str, reply_markup: InlineKeyboardMarkup | None = None):
     if is_group_chat(message.chat) and message.from_user:
         try:
             await bot.send_message(
@@ -96,15 +97,9 @@ async def send_menu(message: Message, bot: Bot, text: str, reply_markup: InlineK
     await message.reply(text, reply_markup=reply_markup)
 
 
-async def is_group_admin(bot: Bot, user_id: int, group_id: int) -> bool:
-    for chat_id in await get_chats_for_group(group_id):
-        try:
-            member = await bot.get_chat_member(chat_id, user_id)
-        except TelegramAPIError:
-            continue  # бота прибрали з чату або чат недоступний
-        if member.status in ("creator", "administrator"):
-            return True
-    return False
+async def menu_markup(bot: Bot, user_id: int, group_id: int | None, owner: int, in_group: bool):
+    show_shared = bool(group_id) and not in_group and await is_group_admin(bot, user_id, group_id)
+    return get_main_menu(group_id, owner, in_group, show_shared)
 
 
 async def link_subjects(user_id: int, group_id: int, shared: bool) -> list[str]:
@@ -138,23 +133,30 @@ async def find_group_by_name(text: str):
 
 
 
-@router.message(Command("start", "menu"))
-async def cmd_start(message: Message, state: FSMContext, bot: Bot):
+@router.message(Command("start", "help", "menu"))
+async def cmd_start(message: Message, command: CommandObject, state: FSMContext, bot: Bot):
     await state.clear()
+    name = command.command  # start / help / menu
+
     if is_group_chat(message.chat):
         group = await resolve_group(message.from_user.id, message.chat)
-        if not group:
-            return await message.reply(
-                "👋 Цей чат ще не привʼязаний до групи.\n"
-                "Адмін має виконати: <code>/setgroup ІЦ-12</code>"
-            )
+        if name == "help" or not group:
+            text = HELP_GROUP
+            if not group:
+                text += "\n\n⚠️ Цей чат ще не привʼязаний до групи."
+            return await send_menu(message, bot, text)
         safe_name = escape(group["group_name"], quote=False)
         return await send_menu(
             message, bot,
             f"👋 <b>Бот розкладу КПІ</b> — {safe_name}\nОбери дію:",
             get_main_menu(group["group_id"], owner=message.from_user.id, in_group=True),
         )
-    await message.reply("👋 <b>Бот розкладу КПІ</b>\n\nОбери дію:", reply_markup=get_main_menu())
+
+    group = await resolve_group(message.from_user.id, message.chat)
+    markup = await menu_markup(bot, message.from_user.id, group["group_id"] if group else None, 0, False)
+    if name == "menu":
+        return await message.reply(SHORT_MENU_DM, reply_markup=markup)
+    await message.reply(HELP_DM, reply_markup=markup)
 
 
 @router.message(Command("setgroup"))
@@ -180,6 +182,7 @@ async def cmd_setgroup(message: Message, command: CommandObject, bot: Bot):
 
     set_by = message.from_user.id if message.from_user else 0
     await set_chat_group(message.chat.id, result["groupName"], result["id"], set_by)
+    clear_admin_cache()
     safe_name = escape(result["groupName"], quote=False)
     await message.reply(f"✅ Чат привʼязано до групи <b>{safe_name}</b>. Відкрий меню: /menu")
 
@@ -196,7 +199,8 @@ async def cb_main_menu(query: CallbackQuery, callback_data: MenuCB, state: FSMCo
     with suppress(TelegramBadRequest):
         await edit_screen(query, bot,
             "🏠 <b>Головне меню</b>",
-            reply_markup=get_main_menu(group["group_id"] if group else None, callback_data.owner, in_group),
+            reply_markup=await menu_markup(bot, query.from_user.id, group["group_id"] if group else None,
+                                           callback_data.owner, in_group),
         )
     await query.answer()
 
@@ -230,7 +234,8 @@ async def cb_refresh(query: CallbackQuery, callback_data: MenuCB, bot: Bot):
     with suppress(TelegramBadRequest):
         await edit_screen(query, bot,
             f"🏠 <b>Головне меню</b>\n<i>🔄 Оновлено о {now_str}</i>",
-            reply_markup=get_main_menu(group["group_id"], callback_data.owner, in_group),
+            reply_markup=await menu_markup(bot, query.from_user.id, group["group_id"],
+                                           callback_data.owner, in_group),
         )
 
 
@@ -256,7 +261,8 @@ async def cb_what_now(query: CallbackQuery, callback_data: MenuCB, bot: Bot):
         await edit_screen(query, bot,
             text="Твій розклад (Rich Messages не підтримуються клієнтом)",
             rich_message=rich_msg,
-            reply_markup=get_main_menu(group["group_id"], callback_data.owner, in_group),
+            reply_markup=await menu_markup(bot, query.from_user.id, group["group_id"],
+                                           callback_data.owner, in_group),
             link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
     await query.answer()
@@ -284,7 +290,8 @@ async def cb_day(query: CallbackQuery, callback_data: DayCB, bot: Bot):
         await edit_screen(query, bot,
             text="Твій розклад (Rich Messages не підтримуються клієнтом)",
             rich_message=rich_msg,
-            reply_markup=get_main_menu(group["group_id"], callback_data.owner, in_group),
+            reply_markup=await menu_markup(bot, query.from_user.id, group["group_id"],
+                                           callback_data.owner, in_group),
             link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
     if callback_data.target == "today" and not in_group:
@@ -575,7 +582,7 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
             with suppress(TelegramBadRequest):
                 await bot.edit_message_text(f"✅ Група <b>{safe_group_name}</b> збережена!", chat_id=message.chat.id,
                                             message_id=msg_id,
-                                            reply_markup=get_main_menu(result["id"]))
+                                            reply_markup=await menu_markup(bot, message.from_user.id, result["id"], 0, False))
         else:
             safe_input = escape(message.text, quote=False)
             text = (f"❌ Групу <b>{safe_input}</b> не знайдено. Спробуй ще раз:" if api_ok
@@ -618,14 +625,14 @@ async def handle_inputs(message: Message, state: FSMContext, bot: Bot):
         subject, pair_type = data["subject"], data["pair_type"]
         shared = bool(data.get("shared"))
 
-        if shared and not await is_group_admin(bot, message.from_user.id, group["group_id"]):
+        if shared and not await is_group_admin(bot, message.from_user.id, group["group_id"], force=True):
             await state.clear()
             with suppress(TelegramBadRequest):
                 await bot.edit_message_text(
                     "⛔ Спільні лінки може задавати тільки адмін чату.",
                     chat_id=message.chat.id,
                     message_id=msg_id,
-                    reply_markup=get_main_menu(group["group_id"]),
+                    reply_markup=await menu_markup(bot, message.from_user.id, group["group_id"], 0, False),
                 )
             return
 
