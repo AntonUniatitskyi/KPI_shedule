@@ -53,7 +53,8 @@ async def get_visible_subjects(user_id: int, group_id: int) -> list[str]:
     return [s for s in all_subjects if s not in hidden]
 
 
-async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bool = False) -> list[RichBlockTableCell]:
+async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bool = False,
+                          include_shared: bool = False) -> list[RichBlockTableCell]:
     lecturer = pair.get("lecturer")
     teacher_name = lecturer.get("name", "Викладач не вказаний") if lecturer else "Викладач не вказаний"
     teacher = short_name(teacher_name) if teacher_name != "Викладач не вказаний" else teacher_name
@@ -61,7 +62,7 @@ async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bo
     subject = pair.get("name", "Невідомий предмет")
     pair_type = pair.get("type", "")
     icon = TYPE_ICONS.get(pair_type, "📘")
-    link = await get_link(user_id, group_id, subject, pair_type)
+    link = await get_link(user_id, group_id, subject, pair_type, include_shared)
 
     time_text = f"🟢 {pair['time'][:5]}" if is_active else pair["time"][:5]
 
@@ -96,7 +97,8 @@ async def create_pair_row(pair: dict, group_id: int, user_id: int, is_active: bo
     return [time_cell, subject_cell, teacher_cell, location_cell, link_cell]
 
 
-async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int) -> InputRichMessage:
+async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int,
+                     include_shared: bool = False) -> InputRichMessage:
     week_key = get_week_type(date)
     day_key = DAYS_MAP.get(date.weekday())
     blocks = []
@@ -124,7 +126,8 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
 
     active_time = get_active_pair_time(now_kyiv()) if date.date() == now_kyiv().date() else None
     rows = [
-        await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time))
+        await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time),
+                              include_shared=include_shared)
         for pair in valid_pairs
     ]
 
@@ -134,7 +137,8 @@ async def format_day(schedule: dict, date: datetime, group_id: int, user_id: int
     return InputRichMessage(blocks=blocks)
 
 
-async def format_week(schedule: dict, start_date: datetime, group_id: int, user_id: int) -> InputRichMessage:
+async def format_week(schedule: dict, start_date: datetime, group_id: int, user_id: int,
+                      include_shared: bool = False) -> InputRichMessage:
     week_key = get_week_type(start_date)
     week_name = "Перший тиждень" if week_key == "scheduleFirstWeek" else "Другий тиждень"
     days = schedule.get(week_key, [])
@@ -160,7 +164,8 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
         active_time = get_active_pair_time(now_kyiv()) if is_today else None
 
         rows = [
-            await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time))
+            await create_pair_row(pair, group_id, user_id, is_active=(pair["time"][:5] == active_time),
+                              include_shared=include_shared)
             for pair in valid_pairs
         ]
 
@@ -181,7 +186,8 @@ async def format_week(schedule: dict, start_date: datetime, group_id: int, user_
     return InputRichMessage(blocks=blocks)
 
 
-async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: int) -> InputRichMessage:
+async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: int,
+                       include_shared: bool = False) -> InputRichMessage:
     blocks = []
     if now.weekday() == 6:
         blocks.extend([InputRichBlockSectionHeading(text="🔥 Що зараз?", size=2),
@@ -225,7 +231,7 @@ async def get_what_now(schedule: dict, now: datetime, group_id: int, user_id: in
         blocks.append(InputRichBlockParagraph(text="За твоїм вибором тут вікно. Час зробити каву! ☕"))
         return InputRichMessage(blocks=blocks)
 
-    row_data = await create_pair_row(active_pair, group_id, user_id)
+    row_data = await create_pair_row(active_pair, group_id, user_id, include_shared=include_shared)
 
     custom_headers = ["Предмет", "Викладач", "Ауд.", "Лінк"]
     header_cells = [
